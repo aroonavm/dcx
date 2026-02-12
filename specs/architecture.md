@@ -122,6 +122,7 @@ dcx up                                    # Uses current directory
 dcx up --workspace-folder /path/to/project
 dcx up --workspace-folder=./local/path
 dcx up --dry-run                          # Show what would happen without doing it
+dcx up --yes                              # Skip confirmation for non-owned directories
 ```
 
 **Behavior:**
@@ -197,7 +198,7 @@ dcx down --workspace-folder /path/to/project
 8. Unmount `bindfs` (`fusermount -u` on Linux, `umount` on macOS)
 9. Remove mount directory
 
-**Signal handling:** If SIGINT arrives during step 6 (container stop), bail immediately. If SIGINT arrives during step 7 (unmount in progress), log "Signal received, finishing unmount..." and complete the unmount before exiting.
+**Signal handling:** If SIGINT arrives during step 7 (container stop), bail immediately. If SIGINT arrives during step 8 (unmount in progress), log "Signal received, finishing unmount..." and complete the unmount before exiting.
 
 **Idempotent for missing mounts:** Safe to call multiple times when mount was never created. If no mount found, prints informational message and exits cleanly (exit code 0). If workspace directory is deleted, fails with error — use `dcx clean` to recover.
 

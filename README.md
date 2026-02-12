@@ -7,8 +7,7 @@ Dynamic workspace mounting wrapper for Colima devcontainers.
 ```bash
 # Setup (one time)
 sudo apt install bindfs
-mkdir -p ~/.colima-mounts
-# Edit ~/.config/colima/default/colima.yaml to mount ~/colima-mounts
+# Edit ~/.config/colima/default/colima.yaml to mount ~/.colima-mounts
 colima stop && colima start
 cp dcx ~/.local/bin/dcx && chmod +x ~/.local/bin/dcx
 
