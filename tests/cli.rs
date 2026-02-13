@@ -247,6 +247,36 @@ fn status_output_is_table_or_no_workspaces() {
 // --- dcx exec ---
 
 #[test]
+fn exec_no_mount_exits_nonzero_with_message() {
+    // Workspace exists on disk but has no dcx mount.
+    // When Docker is available: exit 1 with "No mount found" on stderr.
+    // When Docker is unavailable: exit 1 with Docker error on stderr.
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    workspace
+        .child(".devcontainer/devcontainer.json")
+        .touch()
+        .unwrap();
+    let out = dcx()
+        .args([
+            "exec",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+            "--",
+            "true",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "dcx exec with no mount must fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("No mount found") || stderr.contains("Docker is not available"),
+        "expected 'No mount found' or Docker error on stderr, got: {stderr}"
+    );
+}
+
+#[test]
 fn exec_missing_workspace_exits_nonzero() {
     // A workspace path that does not exist must fail.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.
@@ -317,15 +347,15 @@ fn down_valid_workspace_no_mount_exits_zero_or_one() {
 fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
     // When Docker is available and no mount exists, "Nothing to do." must appear on stdout.
     // When Docker is unavailable, stderr gets the Docker error (stdout is empty).
-    // Either way, stdout must not contain a clap error.
     let out = dcx()
         .args(["down", "--workspace-folder", "/tmp"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        !stdout.contains("error:"),
-        "dcx down stdout must not contain a clap error: {stdout}"
+        stdout.contains("Nothing to do.") || stderr.contains("Docker is not available"),
+        "expected 'Nothing to do.' on stdout or Docker error on stderr, got stdout={stdout} stderr={stderr}"
     );
 }
 
