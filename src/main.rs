@@ -11,6 +11,8 @@ mod format;
 mod mount_table;
 mod naming;
 mod platform;
+mod progress;
+mod signals;
 mod status;
 mod up;
 mod workspace;

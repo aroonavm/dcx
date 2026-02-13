@@ -7,6 +7,7 @@ use crate::exit_codes;
 use crate::format::DoctorCheck;
 use crate::naming::relay_dir;
 use crate::platform;
+use crate::progress;
 
 /// Extract the first version-like token (`MAJOR.MINOR[.PATCH...]`) from `output`.
 ///
@@ -179,6 +180,7 @@ pub fn check_relay_in_vm() -> DoctorCheck {
 /// Returns `exit_codes::SUCCESS` (0) if all checks pass, `exit_codes::RUNTIME_ERROR` (1)
 /// if any check fails.
 pub fn run_doctor(home: &Path) -> i32 {
+    progress::step("Running prerequisite checks...");
     let checks = vec![
         check_bindfs(),
         check_devcontainer(),

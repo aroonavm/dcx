@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 
 use crate::cmd;
 use crate::docker;
@@ -8,6 +9,9 @@ use crate::exit_codes;
 use crate::mount_table;
 use crate::naming::{is_dcx_managed_path, mount_name, relay_dir};
 use crate::platform;
+use crate::progress;
+use crate::signals;
+use crate::up::tilde_path;
 use crate::workspace::resolve_workspace;
 
 // ── Pure functions ────────────────────────────────────────────────────────────
@@ -28,6 +32,12 @@ pub fn workspace_missing_error() -> &'static str {
 ///
 /// Returns the exit code that `main` should pass to `std::process::exit`.
 pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
+    // Install SIGINT handler. If Ctrl+C arrives during container stop (step 7),
+    // devcontainer is killed (same process group) and run_stream returns non-zero,
+    // so we bail at the code != 0 check. If Ctrl+C arrives during unmount (step 8),
+    // we log a message and complete the unmount before exiting.
+    let interrupted = signals::interrupted_flag();
+
     // 1. Validate Docker/Colima is available.
     if !docker::is_docker_available() {
         eprintln!("Docker is not available. Is Colima running?");
@@ -42,6 +52,10 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
             return exit_codes::USAGE_ERROR;
         }
     };
+    progress::step(&format!(
+        "Resolving workspace path: {}",
+        workspace.display()
+    ));
 
     // 4. Recursive mount guard — block nested dcx mounts.
     let relay = relay_dir(home);
@@ -66,6 +80,8 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
     }
 
     // 7. Delegate to `devcontainer down` to stop the container.
+    // If SIGINT arrives here, devcontainer is killed and returns non-zero → we bail.
+    progress::step("Stopping devcontainer...");
     let mount_str = mount_point.to_string_lossy();
     let code = cmd::run_stream(
         "devcontainer",
@@ -76,7 +92,14 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
         return code;
     }
 
-    // 8. Unmount bindfs.
+    // 8. Unmount bindfs. If SIGINT arrived between steps 7 and 8 (or during unmount),
+    // log the message and complete the unmount before exiting.
+    let was_interrupted = interrupted.load(Ordering::Relaxed);
+    if was_interrupted {
+        eprintln!("Signal received, finishing unmount...");
+    }
+    let tilde_mp = tilde_path(&mount_point, home);
+    progress::step(&format!("Unmounting {tilde_mp}..."));
     let prog = platform::unmount_prog();
     let args = platform::unmount_args(&mount_point);
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -98,6 +121,11 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
         return exit_codes::RUNTIME_ERROR;
     }
 
+    if was_interrupted {
+        return exit_codes::RUNTIME_ERROR;
+    }
+
+    progress::step("Done.");
     exit_codes::SUCCESS
 }
 

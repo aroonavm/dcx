@@ -8,6 +8,7 @@ use crate::exit_codes;
 use crate::mount_table;
 use crate::naming::{is_dcx_managed_path, mount_name, relay_dir};
 use crate::platform;
+use crate::progress;
 use crate::workspace::resolve_workspace;
 
 // ── Pure functions ────────────────────────────────────────────────────────────
@@ -45,6 +46,10 @@ pub fn run_exec(home: &Path, workspace_folder: Option<PathBuf>, command: Vec<Str
             return exit_codes::USAGE_ERROR;
         }
     };
+    progress::step(&format!(
+        "Resolving workspace path: {}",
+        workspace.display()
+    ));
 
     // 3. Recursive mount guard — block nested dcx mounts.
     let relay = relay_dir(home);
@@ -74,6 +79,8 @@ pub fn run_exec(home: &Path, workspace_folder: Option<PathBuf>, command: Vec<Str
     }
 
     // 6. Rewrite workspace path and delegate to `devcontainer exec`.
+    // SIGINT is forwarded naturally to the child (same process group). No special handling needed.
+    progress::step("Running exec in container...");
     let mount_str = mount_point.to_string_lossy();
     let mut args = vec!["exec", "--workspace-folder", mount_str.as_ref()];
     if !command.is_empty() {

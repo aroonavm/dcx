@@ -3,12 +3,16 @@
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
+use std::sync::atomic::Ordering;
+
 use crate::cmd;
 use crate::docker;
 use crate::exit_codes;
 use crate::mount_table;
 use crate::naming::{is_dcx_managed_path, mount_name, relay_dir};
 use crate::platform;
+use crate::progress;
+use crate::signals;
 use crate::workspace::{find_devcontainer_config, resolve_workspace};
 
 // ── Pure functions ────────────────────────────────────────────────────────────
@@ -183,6 +187,10 @@ fn rollback(mount_point: &Path) {
 ///
 /// Returns the exit code that `main` should pass to `std::process::exit`.
 pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes: bool) -> i32 {
+    // Install SIGINT handler before any mount operations so Ctrl+C triggers rollback
+    // rather than leaving an orphaned mount.
+    let interrupted = signals::interrupted_flag();
+
     // 1. Validate Docker/Colima is available.
     if !docker::is_docker_available() {
         eprintln!("Docker is not available. Is Colima running?");
@@ -197,6 +205,10 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
             return exit_codes::USAGE_ERROR;
         }
     };
+    progress::step(&format!(
+        "Resolving workspace path: {}",
+        workspace.display()
+    ));
 
     // 3. Recursive mount guard — block nested dcx mounts.
     let relay = relay_dir(home);
@@ -266,6 +278,8 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
             }
             None => {
                 // Accessible dir but not in mount table — leftover dir, mount fresh.
+                let tilde_mp = tilde_path(&mount_point, home);
+                progress::step(&format!("Mounting workspace to {tilde_mp}..."));
                 if let Err(e) = do_mount(&workspace, &mount_point) {
                     eprintln!("{e}");
                     return exit_codes::RUNTIME_ERROR;
@@ -282,6 +296,8 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
                 return exit_codes::RUNTIME_ERROR;
             }
         }
+        let tilde_mp = tilde_path(&mount_point, home);
+        progress::step(&format!("Mounting workspace to {tilde_mp}..."));
         // Create dir and mount (create_dir_all is a no-op if dir already exists).
         if let Err(e) = do_mount(&workspace, &mount_point) {
             eprintln!("{e}");
@@ -291,6 +307,9 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
     };
 
     // 10. Delegate to `devcontainer up` with rewritten workspace path.
+    // If Ctrl+C is pressed during this step, devcontainer (same process group) is killed,
+    // run_stream returns non-zero, and we roll back below.
+    progress::step("Starting devcontainer...");
     let code = cmd::run_stream(
         "devcontainer",
         &["up", "--workspace-folder", &mount_point.to_string_lossy()],
@@ -298,6 +317,8 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
     .unwrap_or(exit_codes::PREREQ_NOT_FOUND);
 
     // 11. Roll back on failure (if we mounted this run) and return RUNTIME_ERROR.
+    // This handles both normal devcontainer failures and Ctrl+C (SIGINT kills the child,
+    // returning non-zero, which lands here for rollback).
     // The spec requires exit code 1 (not the child's exit code) when dcx up fails
     // after rollback, because the failure is a dcx error, not a pass-through.
     if code != 0 {
@@ -307,6 +328,10 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
         return exit_codes::RUNTIME_ERROR;
     }
 
+    // Suppress "unused variable" warning — the flag is kept alive intentionally.
+    let _ = interrupted.load(Ordering::Relaxed);
+
+    progress::step("Done.");
     exit_codes::SUCCESS
 }
 

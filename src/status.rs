@@ -9,6 +9,7 @@ use crate::format::{StatusRow, format_status_table};
 use crate::mount_table;
 use crate::naming::relay_dir;
 use crate::platform;
+use crate::progress;
 
 /// Human-readable state label for a dcx mount entry.
 ///
@@ -65,6 +66,7 @@ pub fn run_status(home: &Path) -> i32 {
         return exit_codes::RUNTIME_ERROR;
     }
 
+    progress::step("Scanning workspaces...");
     let relay = relay_dir(home);
     let mounts = scan_relay(&relay);
 

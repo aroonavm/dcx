@@ -423,6 +423,99 @@ fn clean_all_yes_with_empty_relay_prints_nothing_to_clean() {
     );
 }
 
+// --- Progress output ---
+
+// The progress arrow character (→ U+2192) must appear on stderr when commands
+// advance past the initial Docker check. Tests that require Docker use the
+// "if exit 0" guard pattern (same as the dry-run test above).
+
+#[test]
+fn up_dry_run_emits_progress_to_stderr() {
+    // When Docker is available, `dcx up --dry-run` resolves the workspace and
+    // prints a `→ Resolving workspace path: ...` step to stderr before the plan.
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    workspace
+        .child(".devcontainer/devcontainer.json")
+        .touch()
+        .unwrap();
+    let out = dcx()
+        .args([
+            "up",
+            "--dry-run",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    if out.status.code() == Some(0) {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains('\u{2192}'),
+            "expected → progress arrow on stderr, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("Resolving workspace path:"),
+            "expected 'Resolving workspace path:' in progress output, got: {stderr}"
+        );
+    }
+    // If Docker is unavailable (exit 1), no progress before the docker check — skip.
+}
+
+#[test]
+fn down_no_mount_emits_progress_to_stderr() {
+    // When Docker is available and the workspace exists, `dcx down` prints at least
+    // the `→ Resolving workspace path:` step to stderr before "Nothing to do.".
+    use assert_fs::TempDir;
+    let workspace = TempDir::new().unwrap();
+    let out = dcx()
+        .args([
+            "down",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    if out.status.code() == Some(0) {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains('\u{2192}'),
+            "expected → progress arrow on stderr, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("Resolving workspace path:"),
+            "expected 'Resolving workspace path:' in progress output, got: {stderr}"
+        );
+    }
+    // If Docker is unavailable (exit 1), no progress before the docker check — skip.
+}
+
+#[test]
+fn clean_emits_progress_to_stderr() {
+    // When Docker is available, `dcx clean` with an empty relay dir prints
+    // `→ Scanning relay directory...` to stderr before "Nothing to clean.".
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .arg("clean")
+        .output()
+        .unwrap();
+    if out.status.code() == Some(0) {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains('\u{2192}'),
+            "expected → progress arrow on stderr, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("Scanning relay directory"),
+            "expected 'Scanning relay directory' in progress output, got: {stderr}"
+        );
+    }
+    // If Docker is unavailable (exit 1), no progress before the docker check — skip.
+}
+
 // --- Pass-through ---
 
 #[test]

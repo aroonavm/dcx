@@ -3,6 +3,8 @@
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
+use std::sync::atomic::Ordering;
+
 use crate::categorize::{self, MountStatus};
 use crate::cmd;
 use crate::docker;
@@ -11,6 +13,8 @@ use crate::format::{self, CleanEntry};
 use crate::mount_table;
 use crate::naming::relay_dir;
 use crate::platform;
+use crate::progress;
+use crate::signals;
 use crate::status::query_container;
 
 // ── Pure functions ─────────────────────────────────────────────────────────────
@@ -139,6 +143,10 @@ fn clean_one(mount_point: &Path, status: &MountStatus) -> Result<&'static str, S
 ///
 /// Returns the exit code that `main` should pass to `std::process::exit`.
 pub fn run_clean(home: &Path, all: bool, yes: bool) -> i32 {
+    // Install SIGINT handler. If Ctrl+C arrives while an unmount is in progress,
+    // we finish that entry's cleanup then exit (remaining entries are skipped).
+    let interrupted = signals::interrupted_flag();
+
     // 1. Validate Docker/Colima is available.
     if !docker::is_docker_available() {
         eprintln!("Docker is not available. Is Colima running?");
@@ -146,6 +154,7 @@ pub fn run_clean(home: &Path, all: bool, yes: bool) -> i32 {
     }
 
     // 2. Scan relay dir for dcx-* entries.
+    progress::step("Scanning relay directory...");
     let relay = relay_dir(home);
     let entry_paths = scan_relay(&relay);
 
@@ -235,6 +244,7 @@ pub fn run_clean(home: &Path, all: bool, yes: bool) -> i32 {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        progress::step(&format!("Cleaning {mount_name_str}..."));
         match clean_one(&entry.path, &entry.status) {
             Ok(action) => {
                 cleaned.push(CleanEntry {
@@ -247,6 +257,12 @@ pub fn run_clean(home: &Path, all: bool, yes: bool) -> i32 {
             Err(e) => {
                 failures.push(format!("{}: {e}", entry.path.display()));
             }
+        }
+        // If SIGINT arrived during this entry's cleanup, finish it (already done above)
+        // and exit without processing remaining entries.
+        if interrupted.load(Ordering::Relaxed) {
+            eprintln!("Signal received, finishing current unmount...");
+            break;
         }
     }
 
