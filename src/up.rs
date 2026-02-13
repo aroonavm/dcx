@@ -307,8 +307,16 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
     };
 
     // 10. Delegate to `devcontainer up` with rewritten workspace path.
-    // If Ctrl+C is pressed during this step, devcontainer (same process group) is killed,
-    // run_stream returns non-zero, and we roll back below.
+    // Check the interrupted flag before starting devcontainer: if SIGINT arrived
+    // in the window between do_mount returning and here, roll back and exit cleanly.
+    if interrupted.load(Ordering::Relaxed) {
+        if mounted_fresh {
+            rollback(&mount_point);
+        }
+        return exit_codes::RUNTIME_ERROR;
+    }
+    // If Ctrl+C is pressed during devcontainer up, devcontainer (same process group)
+    // is killed, run_stream returns non-zero, and we roll back below.
     progress::step("Starting devcontainer...");
     let code = cmd::run_stream(
         "devcontainer",
@@ -327,9 +335,6 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
         }
         return exit_codes::RUNTIME_ERROR;
     }
-
-    // Suppress "unused variable" warning — the flag is kept alive intentionally.
-    let _ = interrupted.load(Ordering::Relaxed);
 
     progress::step("Done.");
     exit_codes::SUCCESS
