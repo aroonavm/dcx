@@ -29,6 +29,6 @@ A phase is complete when:
 ## Current status
 After each phase is over, check that the current state of the code exactly follows the spec. Then update this status and commit the code.
 
-Phase: 3
-Last completed: Phase 2 — platform abstraction + subprocess helpers
-Next: Phase 3 — CLI parsing + pass-through (see `specs/TASKS.md`)
+Phase: 4
+Last completed: Phase 3 — CLI parsing + pass-through
+Next: Phase 4 — dcx doctor + dcx status (see `specs/TASKS.md`)
