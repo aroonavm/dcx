@@ -1,5 +1,26 @@
 #![allow(dead_code)]
 
+//! Mount categorization for `dcx` relay-directory entries.
+//!
+//! # Spec note — Stale vs Empty
+//!
+//! The spec (architecture.md § "dcx clean") defines four categories where "Stale mount"
+//! covers both "bindfs mount doesn't exist" and "bindfs mount is unhealthy". This module
+//! refines that into two distinct variants:
+//!
+//! | Spec category  | This module         | Criterion                                   |
+//! |----------------|---------------------|---------------------------------------------|
+//! | Stale mount    | `Stale`             | In mount table, but inaccessible            |
+//! | Stale mount    | `Empty`             | Not in mount table (no FUSE entry at all)   |
+//! | Empty directory| `Empty`             | Not in mount table (leftover dir)           |
+//! | Active mount   | `Active`            | In mount table, accessible, has container   |
+//! | Orphaned mount | `Orphaned`          | In mount table, accessible, no container    |
+//!
+//! The split is necessary because `dcx clean` should skip the unmount step when there is
+//! no mount table entry (`Empty`), whereas it should attempt unmount for `Stale`. Without
+//! a state file (which the spec explicitly rejects), "was previously mounted" and "never
+//! mounted" are indistinguishable, so both map to `Empty`.
+
 #[derive(Debug, PartialEq)]
 pub enum MountStatus {
     /// Healthy bindfs mount with a running container.
@@ -32,6 +53,9 @@ pub enum MountStatus {
 ///
 /// Both cases are cleaned by `dcx clean`; the only behavioral difference is whether a
 /// (likely-to-fail) unmount is attempted first.
+///
+/// Note: inputs where `!is_fuse_mounted && has_container` are logically impossible in
+/// practice but are still handled deterministically (→ `Empty`).
 pub fn categorize(is_fuse_mounted: bool, is_accessible: bool, has_container: bool) -> MountStatus {
     if !is_fuse_mounted {
         return MountStatus::Empty;
@@ -78,5 +102,17 @@ mod tests {
     #[test]
     fn empty_when_nothing_present() {
         assert_eq!(categorize(false, false, false), MountStatus::Empty);
+    }
+
+    #[test]
+    fn empty_when_not_mounted_inaccessible_with_container_flag() {
+        // Logically impossible in practice but must be deterministic.
+        assert_eq!(categorize(false, false, true), MountStatus::Empty);
+    }
+
+    #[test]
+    fn empty_when_not_mounted_accessible_with_container_flag() {
+        // Logically impossible in practice but must be deterministic.
+        assert_eq!(categorize(false, true, true), MountStatus::Empty);
     }
 }

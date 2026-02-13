@@ -59,6 +59,11 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_digits_unchanged() {
+        assert_eq!(sanitize_name("proj123"), "proj123");
+    }
+
+    #[test]
     fn sanitize_hyphen_stays_hyphen() {
         assert_eq!(sanitize_name("my-project"), "my-project");
     }
@@ -106,7 +111,10 @@ mod tests {
     fn hash_is_8_lowercase_hex_chars() {
         let h = compute_hash("/home/user/myproject");
         assert_eq!(h.len(), 8);
-        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(
+            h.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        );
     }
 
     #[test]

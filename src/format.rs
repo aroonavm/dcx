@@ -48,7 +48,7 @@ pub struct DoctorCheck {
 /// Format the full `dcx doctor` report.
 pub fn format_doctor_report(checks: &[DoctorCheck]) -> String {
     let mut lines = vec!["Checking prerequisites...".to_string()];
-    let all_passed = checks.iter().all(|c| c.passed);
+    let all_passed = !checks.is_empty() && checks.iter().all(|c| c.passed);
 
     for check in checks {
         if check.passed {
@@ -153,6 +153,26 @@ mod tests {
     }
 
     #[test]
+    fn status_table_columns_are_aligned() {
+        let rows = vec![StatusRow {
+            workspace: Some("/home/user/project-a".to_string()),
+            mount: "dcx-project-a-a1b2c3d4".to_string(),
+            container: Some("abc123".to_string()),
+            state: "running".to_string(),
+        }];
+        let out = format_status_table(&rows);
+        let mut lines = out.lines();
+        let header = lines.next().unwrap();
+        let data = lines.next().unwrap();
+        let mount_col = header.find("MOUNT").unwrap();
+        let mount_data_col = data.find("dcx-").unwrap();
+        assert_eq!(
+            mount_col, mount_data_col,
+            "MOUNT column misaligned:\nheader: {header}\ndata:   {data}"
+        );
+    }
+
+    #[test]
     fn status_table_unknown_workspace_shown() {
         let rows = vec![StatusRow {
             workspace: None,
@@ -172,6 +192,7 @@ mod tests {
     fn doctor_report_starts_with_checking_prerequisites() {
         let out = format_doctor_report(&[]);
         assert!(out.starts_with("Checking prerequisites..."));
+        assert!(!out.contains("All checks passed."));
     }
 
     #[test]

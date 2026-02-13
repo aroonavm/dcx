@@ -136,6 +136,17 @@ mod tests {
     }
 
     #[test]
+    fn proc_mounts_truncated_octal_escape_treated_as_literal() {
+        // A backslash not followed by exactly 3 octal digits is passed through as-is.
+        let text =
+            "/home/user/bad\\04x /home/user/.colima-mounts/dcx-bad-abc12345 fuse.bindfs rw 0 0";
+        let entries = parse_proc_mounts(text);
+        assert_eq!(entries.len(), 1);
+        // The '\' is kept literally since "04x" is not valid octal.
+        assert_eq!(entries[0].source, "/home/user/bad\\04x");
+    }
+
+    #[test]
     fn proc_mounts_unescapes_spaces_in_paths() {
         // /proc/mounts encodes spaces as \040.
         let text = "/home/user/my\\040project \
