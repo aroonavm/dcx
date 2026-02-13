@@ -13,16 +13,29 @@ use crate::workspace::{find_devcontainer_config, resolve_workspace};
 
 // ── Pure functions ────────────────────────────────────────────────────────────
 
+/// Abbreviate `path` with `~` if it starts with `home`.
+pub fn tilde_path(path: &Path, home: &Path) -> String {
+    match path.strip_prefix(home) {
+        Ok(rel) => {
+            let rel_str = rel.to_string_lossy();
+            if rel_str.is_empty() {
+                "~".to_string()
+            } else {
+                format!("~/{rel_str}")
+            }
+        }
+        Err(_) => path.display().to_string(),
+    }
+}
+
 /// Format the `--dry-run` plan message for `dcx up`.
-pub fn dry_run_plan(workspace: &Path, mount_point: &Path) -> String {
-    let devcontainer_cmd = cmd::display_cmd(
-        "devcontainer",
-        &["up", "--workspace-folder", &mount_point.to_string_lossy()],
-    );
+pub fn dry_run_plan(workspace: &Path, mount_point: &Path, home: &Path) -> String {
+    let tilde_mount = tilde_path(mount_point, home);
+    let devcontainer_cmd =
+        cmd::display_cmd("devcontainer", &["up", "--workspace-folder", &tilde_mount]);
     format!(
-        "Would mount: {} \u{2192} {}\nWould run: {devcontainer_cmd}",
+        "Would mount: {} \u{2192} {tilde_mount}\nWould run: {devcontainer_cmd}",
         workspace.display(),
-        mount_point.display(),
     )
 }
 
@@ -62,20 +75,42 @@ fn current_username() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
+/// Look up the username for a UID by parsing `/etc/passwd`.
+///
+/// Returns the username if found, or `"UID <n>"` as a fallback.
+fn username_for_uid(uid: u32) -> String {
+    if let Ok(content) = std::fs::read_to_string("/etc/passwd") {
+        for line in content.lines() {
+            let mut fields = line.splitn(7, ':');
+            let name = fields.next().unwrap_or("");
+            let _ = fields.next(); // password
+            let uid_field = fields.next().unwrap_or("");
+            if uid_field.parse::<u32>().ok() == Some(uid) {
+                return name.to_string();
+            }
+        }
+    }
+    format!("UID {uid}")
+}
+
 // ── I/O helpers ───────────────────────────────────────────────────────────────
 
 /// Prompt the user for confirmation when the workspace is not owned by them.
 ///
 /// Returns `true` if the user confirms, `false` if they decline or input fails.
 fn confirm_non_owned(workspace: &Path, owner_uid: u32, current_uid: u32) -> bool {
+    let owner_name = username_for_uid(owner_uid);
     let current_name = current_username();
-    eprintln!("\u{26a0} Directory not owned by current user:");
-    eprintln!("  Owner:        UID {owner_uid}");
-    eprintln!("  Current user: {current_name} (UID {current_uid})");
-    eprintln!("  The directory will be mounted in the container as '{current_name}'.");
-    eprintln!("  Access may fail if directory permissions don't allow it.");
-    eprintln!("  Workspace: {}", workspace.display());
-    eprint!("Continue? [y/N] ");
+    eprintln!(
+        "\u{26a0}\u{fe0f}  Directory {} is owned by {owner_name} (UID {owner_uid})",
+        workspace.display()
+    );
+    eprintln!("    Current user is {current_name} (UID {current_uid})");
+    eprintln!();
+    eprintln!("    In the container, you'll run as {current_name} ({current_uid}).");
+    eprintln!("    You'll have read/write access only if the directory permissions allow it.");
+    eprintln!();
+    eprint!("Proceed? [y/N] ");
     let _ = io::stderr().flush();
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
@@ -188,7 +223,7 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
 
     // 6. Dry-run: print plan and exit without side effects.
     if dry_run {
-        println!("{}", dry_run_plan(&workspace, &mount_point));
+        println!("{}", dry_run_plan(&workspace, &mount_point, home));
         return exit_codes::SUCCESS;
     }
 
@@ -262,35 +297,94 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
     )
     .unwrap_or(exit_codes::PREREQ_NOT_FOUND);
 
-    // 11. Roll back the mount if devcontainer up failed (and we mounted this run).
-    if code != 0 && mounted_fresh {
-        rollback(&mount_point);
+    // 11. Roll back on failure (if we mounted this run) and return RUNTIME_ERROR.
+    // The spec requires exit code 1 (not the child's exit code) when dcx up fails
+    // after rollback, because the failure is a dcx error, not a pass-through.
+    if code != 0 {
+        if mounted_fresh {
+            rollback(&mount_point);
+        }
+        return exit_codes::RUNTIME_ERROR;
     }
 
-    code
+    exit_codes::SUCCESS
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // --- tilde_path ---
+
+    #[test]
+    fn tilde_path_abbreviates_home_prefix() {
+        let home = Path::new("/home/user");
+        let path = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
+        assert_eq!(
+            tilde_path(path, home),
+            "~/.colima-mounts/dcx-myproject-a1b2c3d4"
+        );
+    }
+
+    #[test]
+    fn tilde_path_leaves_non_home_path_unchanged() {
+        let home = Path::new("/home/user");
+        let path = Path::new("/tmp/something");
+        assert_eq!(tilde_path(path, home), "/tmp/something");
+    }
+
+    #[test]
+    fn tilde_path_home_dir_itself_is_tilde() {
+        let home = Path::new("/home/user");
+        assert_eq!(tilde_path(home, home), "~");
+    }
+
+    #[test]
+    fn tilde_path_does_not_match_sibling_dir() {
+        // /home/user2 must NOT be abbreviated for home=/home/user.
+        let home = Path::new("/home/user");
+        let path = Path::new("/home/user2/.colima-mounts/dcx-proj-a1b2c3d4");
+        assert_eq!(
+            tilde_path(path, home),
+            "/home/user2/.colima-mounts/dcx-proj-a1b2c3d4"
+        );
+    }
+
     // --- dry_run_plan ---
 
     #[test]
     fn dry_run_plan_contains_would_mount() {
+        let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp);
+        let out = dry_run_plan(ws, mp, home);
         assert!(out.contains("Would mount:"), "got: {out}");
         assert!(out.contains("/home/user/myproject"), "got: {out}");
         assert!(out.contains("dcx-myproject-a1b2c3d4"), "got: {out}");
     }
 
     #[test]
-    fn dry_run_plan_contains_would_run_devcontainer_up() {
+    fn dry_run_plan_uses_tilde_for_mount_path() {
+        let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp);
+        let out = dry_run_plan(ws, mp, home);
+        assert!(
+            out.contains("~/.colima-mounts/dcx-myproject-a1b2c3d4"),
+            "mount path must use tilde abbreviation, got: {out}"
+        );
+        assert!(
+            !out.contains("/home/user/.colima-mounts"),
+            "mount path must not use absolute path, got: {out}"
+        );
+    }
+
+    #[test]
+    fn dry_run_plan_contains_would_run_devcontainer_up() {
+        let home = Path::new("/home/user");
+        let ws = Path::new("/home/user/myproject");
+        let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
+        let out = dry_run_plan(ws, mp, home);
         assert!(out.contains("Would run:"), "got: {out}");
         assert!(
             out.contains("devcontainer up --workspace-folder"),
@@ -301,9 +395,10 @@ mod tests {
 
     #[test]
     fn dry_run_plan_arrow_between_workspace_and_mount() {
+        let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp);
+        let out = dry_run_plan(ws, mp, home);
         let arrow_pos = out
             .find('\u{2192}')
             .expect("→ arrow not found in dry-run output");

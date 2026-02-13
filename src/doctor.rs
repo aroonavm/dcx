@@ -112,7 +112,7 @@ pub fn check_colima() -> DoctorCheck {
 pub fn check_unmount_tool() -> DoctorCheck {
     let prog = platform::unmount_prog();
     DoctorCheck {
-        name: format!("{prog} installed"),
+        name: "Unmount tool available".to_string(),
         passed: which(prog),
         detail: None,
     }
