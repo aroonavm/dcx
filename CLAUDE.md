@@ -29,6 +29,6 @@ A phase is complete when:
 ## Current status
 After each phase is over, update this status and commit the code.
 
-Phase: 2
-Last completed: Phase 1 — pure logic / sans-IO functions
-Next: Phase 2 — platform abstraction + subprocess helpers (see `specs/TASKS.md`)
+Phase: 3
+Last completed: Phase 2 — platform abstraction + subprocess helpers
+Next: Phase 3 — CLI parsing + pass-through (see `specs/TASKS.md`)
