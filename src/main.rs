@@ -1,4 +1,5 @@
 mod categorize;
+mod clean;
 mod cli;
 mod cmd;
 mod docker;
@@ -44,9 +45,8 @@ fn main() {
         cli::Commands::Down { workspace_folder } => {
             std::process::exit(down::run_down(&home_dir(), workspace_folder));
         }
-        cli::Commands::Clean { .. } => {
-            eprintln!("dcx clean: not yet implemented");
-            std::process::exit(exit_codes::RUNTIME_ERROR);
+        cli::Commands::Clean { all, yes } => {
+            std::process::exit(clean::run_clean(&home_dir(), all, yes));
         }
         cli::Commands::Status => {
             std::process::exit(status::run_status(&home_dir()));

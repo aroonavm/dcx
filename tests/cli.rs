@@ -283,6 +283,70 @@ fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
     );
 }
 
+// --- dcx clean ---
+
+#[test]
+fn clean_exits_zero_or_one_not_two() {
+    // Docker may or may not be available. Must not exit 2 (clap parse error).
+    let code = dcx().arg("clean").output().unwrap().status.code();
+    assert_ne!(code, Some(2), "dcx clean must not exit with a clap error");
+}
+
+#[test]
+fn clean_nothing_to_clean_with_empty_home() {
+    // With an empty HOME (no relay dir), exit 0 (nothing to clean) or exit 1 (no Docker).
+    // In either case stdout must not contain a clap error.
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .arg("clean")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("error:"),
+        "dcx clean stdout must not contain a clap error: {stdout}"
+    );
+}
+
+#[test]
+fn clean_nothing_to_clean_message_when_relay_empty() {
+    // When Docker is available and the relay dir is empty, "Nothing to clean." must appear.
+    // When Docker is unavailable, stderr gets the error message.
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .arg("clean")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stdout.contains("Nothing to clean.") || stderr.contains("Docker is not available"),
+        "Expected 'Nothing to clean.' or Docker error, got stdout={stdout} stderr={stderr}"
+    );
+}
+
+#[test]
+fn clean_all_yes_with_empty_relay_prints_nothing_to_clean() {
+    // --all --yes with no entries should succeed without a prompt.
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .args(["clean", "--all", "--yes"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stdout.contains("Nothing to clean.") || stderr.contains("Docker is not available"),
+        "Expected 'Nothing to clean.' or Docker error, got stdout={stdout} stderr={stderr}"
+    );
+}
+
 // --- Pass-through ---
 
 #[test]
