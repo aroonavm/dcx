@@ -8,9 +8,37 @@ pub struct MountEntry {
     pub target: String,
 }
 
+/// Unescape octal sequences in a `/proc/mounts` field.
+///
+/// `/proc/mounts` encodes special characters as `\NNN` (three octal digits),
+/// e.g. `\040` for space. This function decodes them back to their byte values.
+fn unescape_proc_field(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && bytes[i + 1].wrapping_sub(b'0') < 8
+            && bytes[i + 2].wrapping_sub(b'0') < 8
+            && bytes[i + 3].wrapping_sub(b'0') < 8
+        {
+            let val =
+                (bytes[i + 1] - b'0') * 64 + (bytes[i + 2] - b'0') * 8 + (bytes[i + 3] - b'0');
+            result.push(val);
+            i += 4;
+        } else {
+            result.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&result).into_owned()
+}
+
 /// Parse `/proc/mounts` text (Linux) and return only `fuse.bindfs` entries.
 ///
 /// Format per line: `<source> <target> <fstype> <options> <dump> <pass>`
+/// Special characters in paths are octal-escaped (e.g. `\040` for space).
 pub fn parse_proc_mounts(text: &str) -> Vec<MountEntry> {
     text.lines()
         .filter_map(|line| {
@@ -20,8 +48,8 @@ pub fn parse_proc_mounts(text: &str) -> Vec<MountEntry> {
             let fstype = parts.next()?;
             if fstype == "fuse.bindfs" {
                 Some(MountEntry {
-                    source: source.to_string(),
-                    target: target.to_string(),
+                    source: unescape_proc_field(source),
+                    target: unescape_proc_field(target),
                 })
             } else {
                 None
@@ -108,6 +136,21 @@ mod tests {
     }
 
     #[test]
+    fn proc_mounts_unescapes_spaces_in_paths() {
+        // /proc/mounts encodes spaces as \040.
+        let text = "/home/user/my\\040project \
+                    /home/user/.colima-mounts/dcx-my-project-abc12345 \
+                    fuse.bindfs rw 0 0";
+        let entries = parse_proc_mounts(text);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source, "/home/user/my project");
+        assert_eq!(
+            entries[0].target,
+            "/home/user/.colima-mounts/dcx-my-project-abc12345"
+        );
+    }
+
+    #[test]
     fn proc_mounts_returns_multiple_bindfs_entries() {
         let text = "/home/user/proj-a /home/user/.colima-mounts/dcx-proj-a-aaa11111 fuse.bindfs rw 0 0\n\
                     /home/user/proj-b /home/user/.colima-mounts/dcx-proj-b-bbb22222 fuse.bindfs rw 0 0";
@@ -146,6 +189,16 @@ mod tests {
     }
 
     #[test]
+    fn mount_output_returns_multiple_bindfs_entries() {
+        let text = "/Users/user/proj-a on /Users/user/.colima-mounts/dcx-proj-a-aaa11111 (bindfs, local)\n\
+                    /Users/user/proj-b on /Users/user/.colima-mounts/dcx-proj-b-bbb22222 (bindfs, local)";
+        let entries = parse_mount_output(text);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].source, "/Users/user/proj-a");
+        assert_eq!(entries[1].source, "/Users/user/proj-b");
+    }
+
+    #[test]
     fn mount_output_filters_mixed_entries() {
         let text = "/dev/disk1s1 on / (apfs, local, journaled)\n\
                     /Users/user/proj on /Users/user/.colima-mounts/dcx-proj-abc12345 (bindfs, local)\n\
@@ -172,6 +225,25 @@ mod tests {
         let entries: Vec<MountEntry> = vec![];
         let target = Path::new("/home/user/.colima-mounts/dcx-proj-abc12345");
         assert_eq!(find_mount_source(&entries, target), None);
+    }
+
+    #[test]
+    fn find_mount_source_returns_correct_when_not_first() {
+        let entries = vec![
+            MountEntry {
+                source: "/home/user/proj-a".to_string(),
+                target: "/home/user/.colima-mounts/dcx-proj-a-aaa11111".to_string(),
+            },
+            MountEntry {
+                source: "/home/user/proj-b".to_string(),
+                target: "/home/user/.colima-mounts/dcx-proj-b-bbb22222".to_string(),
+            },
+        ];
+        let target = Path::new("/home/user/.colima-mounts/dcx-proj-b-bbb22222");
+        assert_eq!(
+            find_mount_source(&entries, target),
+            Some("/home/user/proj-b")
+        );
     }
 
     #[test]

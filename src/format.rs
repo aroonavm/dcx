@@ -66,11 +66,9 @@ pub fn format_doctor_report(checks: &[DoctorCheck]) -> String {
         }
     }
 
-    lines.push(String::new());
     if all_passed {
+        lines.push(String::new());
         lines.push("All checks passed.".to_string());
-    } else {
-        lines.push("Some checks failed.".to_string());
     }
     lines.join("\n")
 }
@@ -196,7 +194,7 @@ mod tests {
             detail: Some("sudo apt install bindfs".to_string()),
         }];
         let out = format_doctor_report(&checks);
-        assert!(out.contains("Some checks failed."), "got: {out}");
+        assert!(!out.contains("All checks passed."), "got: {out}");
         assert!(out.contains("✗ bindfs not installed"), "got: {out}");
         assert!(out.contains("Fix: sudo apt install bindfs"), "got: {out}");
     }
@@ -216,7 +214,7 @@ mod tests {
             },
         ];
         let out = format_doctor_report(&checks);
-        assert!(out.contains("Some checks failed."));
+        assert!(!out.contains("All checks passed."));
         assert!(out.contains("✓ bindfs installed"));
         assert!(out.contains("✗ devcontainer not installed"));
     }
@@ -267,7 +265,17 @@ mod tests {
         assert!(out.contains("dcx-old-thing-m3n4o5p6"));
         assert!(out.contains("was: empty dir"));
         assert!(out.contains("removed"));
-        // should NOT contain "→" as part of workspace display
+        // The workspace→mount arrow must NOT appear (no workspace to display).
         assert!(!out.contains("None"));
+        assert!(!out.contains("→  dcx-old-thing"));
+    }
+
+    #[test]
+    fn clean_summary_empty_entries_produces_cleaned_zero() {
+        // format_clean_summary is only called when there are entries to report.
+        // The caller emits "Nothing to clean." directly when the list is empty.
+        // Verify the function doesn't panic and produces a well-formed header.
+        let out = format_clean_summary(&[], 0);
+        assert_eq!(out, "Cleaned 0 mounts:");
     }
 }

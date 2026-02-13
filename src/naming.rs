@@ -120,6 +120,13 @@ mod tests {
     }
 
     #[test]
+    fn hash_known_value() {
+        // SHA256 of "/home/user/myproject" → first 8 hex chars.
+        // Pins the hashing algorithm and encoding against silent regression.
+        assert_eq!(compute_hash("/home/user/myproject"), "f227ecb4");
+    }
+
+    #[test]
     fn mount_name_has_dcx_prefix_and_hash_suffix() {
         let path = Path::new("/home/user/myproject");
         let name = mount_name(path);
@@ -135,6 +142,30 @@ mod tests {
         let path = Path::new("/home/user/my.project");
         let name = mount_name(path);
         assert!(name.starts_with("dcx-my-project-"), "got: {name}");
+    }
+
+    #[test]
+    fn mount_name_truncates_long_last_component() {
+        // Last component is 40 chars; sanitized name must be capped at 30.
+        let path = Path::new("/home/user/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let name = mount_name(path);
+        // format: dcx-<≤30 chars>-<8 hex chars>
+        let inner = name
+            .strip_prefix("dcx-")
+            .unwrap()
+            .strip_suffix(&name[name.len() - 9..])
+            .unwrap_or("");
+        let _ = inner; // length check via total length
+        // "dcx-" (4) + 30 + "-" (1) + 8 = 43
+        assert_eq!(name.len(), 43, "got: {name}");
+    }
+
+    #[test]
+    fn mount_name_root_path_produces_double_dash() {
+        // Path::new("/").file_name() returns None → sanitized name is "".
+        // Documents the known edge case: produces "dcx--<hash>".
+        let name = mount_name(Path::new("/"));
+        assert!(name.starts_with("dcx--"), "got: {name}");
     }
 
     #[test]
