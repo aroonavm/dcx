@@ -38,7 +38,7 @@ MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
 out=$("$DCX" clean 2>/dev/null)
 code=$?
 assert_exit "clean safe mode exits 0" 0 "$code"
-assert_contains "clean reports active left untouched" "$out" "active mount"
+assert_contains "clean safe mode prints Nothing to clean" "$out" "Nothing to clean."
 assert_dir_exists "active mount left by safe clean" "$MOUNT_DIR"
 
 # --- Orphaned mount cleanup ---

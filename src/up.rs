@@ -47,8 +47,8 @@ pub fn dry_run_plan(workspace: &Path, mount_point: &Path, home: &Path) -> String
 pub fn collision_error(workspace: &Path, found_source: &str, hash: &str) -> String {
     format!(
         "\u{2717} Mount point already exists but points to wrong source!\n\
-         \x20\x20 Expected: {}\n\
-         \x20\x20 Found:    {found_source}\n\n\
+         \x20\x20Expected: {}\n\
+         \x20\x20Found:    {found_source}\n\n\
          Hash collision detected (both hash to {hash}).\n\
          This is extremely rare (~1 in 4 billion).\n\
          Run `dcx clean` to reset and retry.",
