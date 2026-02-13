@@ -1,8 +1,9 @@
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 fn dcx() -> Command {
-    Command::cargo_bin("dcx").unwrap()
+    cargo_bin_cmd!("dcx")
 }
 
 // --- --help / --version ---
