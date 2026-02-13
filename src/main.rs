@@ -3,6 +3,8 @@ mod cli;
 mod cmd;
 mod docker;
 mod doctor;
+mod down;
+mod exec;
 mod exit_codes;
 mod format;
 mod mount_table;
@@ -33,13 +35,14 @@ fn main() {
         } => {
             std::process::exit(up::run_up(&home_dir(), workspace_folder, dry_run, yes));
         }
-        cli::Commands::Exec { .. } => {
-            eprintln!("dcx exec: not yet implemented");
-            std::process::exit(exit_codes::RUNTIME_ERROR);
+        cli::Commands::Exec {
+            workspace_folder,
+            command,
+        } => {
+            std::process::exit(exec::run_exec(&home_dir(), workspace_folder, command));
         }
-        cli::Commands::Down { .. } => {
-            eprintln!("dcx down: not yet implemented");
-            std::process::exit(exit_codes::RUNTIME_ERROR);
+        cli::Commands::Down { workspace_folder } => {
+            std::process::exit(down::run_down(&home_dir(), workspace_folder));
         }
         cli::Commands::Clean { .. } => {
             eprintln!("dcx clean: not yet implemented");

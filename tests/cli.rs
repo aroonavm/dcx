@@ -198,6 +198,91 @@ fn status_output_is_table_or_no_workspaces() {
     );
 }
 
+// --- dcx exec ---
+
+#[test]
+fn exec_missing_workspace_exits_nonzero() {
+    // A workspace path that does not exist must fail.
+    // exit 1 if Docker is unavailable; exit 2 if Docker is available.
+    dcx()
+        .args([
+            "exec",
+            "--workspace-folder",
+            "/nonexistent/__dcx_test_path__",
+            "--",
+            "true",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn exec_recursive_guard_exits_nonzero() {
+    // Using a path inside ~/.colima-mounts/dcx-* as the workspace must be rejected.
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+    let relay_path = format!("{home}/.colima-mounts/dcx-test-a1b2c3d4");
+    dcx()
+        .args(["exec", "--workspace-folder", &relay_path, "--", "true"])
+        .assert()
+        .failure();
+}
+
+// --- dcx down ---
+
+#[test]
+fn down_missing_workspace_exits_nonzero() {
+    // A workspace path that does not exist must fail.
+    // exit 1 if Docker is unavailable; exit 2 if Docker is available.
+    dcx()
+        .args([
+            "down",
+            "--workspace-folder",
+            "/nonexistent/__dcx_test_path__",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn down_recursive_guard_exits_nonzero() {
+    // Using a path inside ~/.colima-mounts/dcx-* as the workspace must be rejected.
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+    let relay_path = format!("{home}/.colima-mounts/dcx-test-a1b2c3d4");
+    dcx()
+        .args(["down", "--workspace-folder", &relay_path])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn down_valid_workspace_no_mount_exits_zero_or_one() {
+    // /tmp has no dcx mount: exits 0 (Docker available, "Nothing to do")
+    // or exits 1 (Docker not available). Must not exit 2 (clap error).
+    let code = dcx()
+        .args(["down", "--workspace-folder", "/tmp"])
+        .output()
+        .unwrap()
+        .status
+        .code();
+    assert_ne!(code, Some(2), "dcx down must not exit with a clap error");
+}
+
+#[test]
+fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
+    // When Docker is available and no mount exists, "Nothing to do." must appear on stdout.
+    // When Docker is unavailable, stderr gets the Docker error (stdout is empty).
+    // Either way, stdout must not contain a clap error.
+    let out = dcx()
+        .args(["down", "--workspace-folder", "/tmp"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("error:"),
+        "dcx down stdout must not contain a clap error: {stdout}"
+    );
+}
+
 // --- Pass-through ---
 
 #[test]
