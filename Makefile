@@ -1,4 +1,4 @@
-.PHONY: check test lint fmt build
+.PHONY: check test lint fmt build e2e
 
 check: test lint fmt
 
@@ -13,3 +13,9 @@ fmt:
 
 build:
 	cargo build
+
+e2e:
+	@for script in tests/e2e/test_*.sh; do \
+		echo "--- $$script ---"; \
+		bash "$$script"; \
+	done

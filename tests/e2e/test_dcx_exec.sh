@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# E2E tests for `dcx exec`.
+# Requires: Colima running, Docker, bindfs, devcontainer CLI.
+
+source "$(dirname "$0")/setup.sh"
+require_e2e_deps
+
+echo "=== dcx exec ==="
+
+RELAY="$HOME/.colima-mounts"
+WS=$(make_workspace)
+trap 'e2e_cleanup; rm -rf "$WS"' EXIT
+
+# Bring up the workspace first.
+"$DCX" up --workspace-folder "$WS" 2>/dev/null
+
+# --- Happy path: run a command ---
+echo "--- happy path ---"
+out=$("$DCX" exec --workspace-folder "$WS" -- echo hello 2>/dev/null)
+code=$?
+assert_exit "exec exits 0" 0 "$code"
+assert_contains "exec stdout contains hello" "$out" "hello"
+
+# --- Exit code pass-through ---
+echo "--- exit code passthrough ---"
+code=0
+"$DCX" exec --workspace-folder "$WS" -- sh -c 'exit 42' 2>/dev/null || code=$?
+assert_exit "exec passes exit code 42" 42 "$code"
+
+# --- No mount: fails with correct message ---
+echo "--- no mount error ---"
+WS2=$(make_workspace)
+err=$("$DCX" exec --workspace-folder "$WS2" -- true 2>&1) || true
+code=$?
+[ "$code" -ne 0 ] && pass "exec without mount exits non-zero" || fail "exec without mount should fail"
+assert_contains "exec without mount shows error" "$err" "No mount found"
+rm -rf "$WS2"
+
+# --- Recursive mount guard ---
+echo "--- recursive mount guard ---"
+code=0
+"$DCX" exec --workspace-folder "${RELAY}/dcx-test-00000000" -- true 2>/dev/null || code=$?
+[ "$code" -ne 0 ] && pass "recursive guard exits non-zero" || fail "recursive guard should fail"
+
+# --- Progress output on stderr ---
+echo "--- progress output ---"
+stderr_out=$("$DCX" exec --workspace-folder "$WS" -- true 2>&1 >/dev/null) || true
+assert_contains "exec shows resolving step" "$stderr_out" "→ Resolving workspace path:"
+
+summary

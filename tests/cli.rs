@@ -516,6 +516,47 @@ fn clean_emits_progress_to_stderr() {
     // If Docker is unavailable (exit 1), no progress before the docker check — skip.
 }
 
+// --- dcx completions ---
+
+#[test]
+fn completions_bash_exits_zero() {
+    dcx().args(["completions", "bash"]).assert().success();
+}
+
+#[test]
+fn completions_zsh_exits_zero() {
+    dcx().args(["completions", "zsh"]).assert().success();
+}
+
+#[test]
+fn completions_fish_exits_zero() {
+    dcx().args(["completions", "fish"]).assert().success();
+}
+
+#[test]
+fn completions_bash_output_is_nonempty() {
+    dcx()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
+}
+
+#[test]
+fn completions_bash_output_mentions_dcx() {
+    let out = dcx().args(["completions", "bash"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("dcx"),
+        "bash completion output must reference 'dcx', got: {stdout}"
+    );
+}
+
+#[test]
+fn completions_invalid_shell_exits_nonzero() {
+    dcx().args(["completions", "tcsh"]).assert().failure();
+}
+
 // --- Pass-through ---
 
 #[test]

@@ -67,6 +67,13 @@ pub enum Commands {
     /// Validate prerequisites (bindfs, devcontainer, Docker, Colima)
     Doctor,
 
+    /// Generate shell completion script (bash, zsh, fish, powershell, elvish)
+    Completions {
+        /// Target shell
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+
     /// Forward to devcontainer CLI (any unrecognised subcommand)
     #[command(external_subcommand)]
     External(Vec<String>),

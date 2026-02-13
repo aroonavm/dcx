@@ -2,6 +2,7 @@ mod categorize;
 mod clean;
 mod cli;
 mod cmd;
+mod completions;
 mod docker;
 mod doctor;
 mod down;
@@ -55,6 +56,9 @@ fn main() {
         }
         cli::Commands::Doctor => {
             std::process::exit(doctor::run_doctor(&home_dir()));
+        }
+        cli::Commands::Completions { shell } => {
+            std::process::exit(completions::run_completions(shell));
         }
         cli::Commands::External(args) => {
             let code =
