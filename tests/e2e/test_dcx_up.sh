@@ -64,11 +64,46 @@ MOUNT_COUNT_AFTER2=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)
     pass "rollback: no leftover mount" || fail "rollback left a mount behind"
 rm -rf "$WS3"
 
-# --- Recursive mount guard ---
+# --- Recursive mount guard exits 2 ---
 echo "--- recursive mount guard ---"
 code=0
 "$DCX" up --workspace-folder "${RELAY}/dcx-test-00000000" 2>/dev/null || code=$?
-[ "$code" -ne 0 ] && pass "recursive guard exits non-zero" || fail "recursive guard should fail"
+assert_exit "recursive guard exits 2" 2 "$code"
+
+# --- Missing workspace exits 2 ---
+echo "--- missing workspace exits 2 ---"
+code=0
+"$DCX" up --workspace-folder "/nonexistent/__dcx_e2e__" 2>/dev/null || code=$?
+assert_exit "missing workspace exits 2" 2 "$code"
+
+# --- Missing devcontainer config exits 2 ---
+echo "--- missing devcontainer config exits 2 ---"
+WS_NOCONF=$(mktemp -d)
+trap 'e2e_cleanup; rm -rf "$WS" "$WS_NOCONF"' EXIT
+code=0
+"$DCX" up --workspace-folder "$WS_NOCONF" 2>/dev/null || code=$?
+assert_exit "missing config exits 2" 2 "$code"
+rm -rf "$WS_NOCONF"
+
+# --- Non-owned directory warning ---
+echo "--- non-owned directory warning ---"
+if ! sudo -n true 2>/dev/null; then
+    echo "SKIP: sudo not available for non-owned directory test"
+else
+    WS_ROOT=$(make_workspace)
+    sudo chown 0:0 "$WS_ROOT"
+    # Echo N: should abort with exit 4
+    code=0
+    echo "n" | "$DCX" up --workspace-folder "$WS_ROOT" 2>/dev/null || code=$?
+    assert_exit "up non-owned dir N aborts with exit 4" 4 "$code"
+    # --yes: should skip prompt (may fail for other reasons, but not exit 4)
+    code=0
+    "$DCX" up --workspace-folder "$WS_ROOT" --yes 2>/dev/null || code=$?
+    [ "$code" -ne 4 ] && pass "up non-owned dir --yes skips prompt" || fail "up --yes still returned 4"
+    sudo chown "$(id -u):$(id -g)" "$WS_ROOT"
+    e2e_cleanup
+    rm -rf "$WS_ROOT"
+fi
 
 # --- Progress output on stderr ---
 echo "--- progress output ---"

@@ -89,7 +89,7 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
     )
     .unwrap_or(exit_codes::PREREQ_NOT_FOUND);
     if code != 0 {
-        return code;
+        return exit_codes::RUNTIME_ERROR;
     }
 
     // 8. Unmount bindfs. If SIGINT arrived between steps 7 and 8 (or during unmount),

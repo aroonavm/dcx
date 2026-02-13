@@ -42,6 +42,22 @@ code=0
 "$DCX" exec --workspace-folder "${RELAY}/dcx-test-00000000" -- true 2>/dev/null || code=$?
 [ "$code" -ne 0 ] && pass "recursive guard exits non-zero" || fail "recursive guard should fail"
 
+# --- Stale mount ---
+echo "--- stale mount ---"
+MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
+# Simulate stale FUSE: unmount without removing the directory.
+if [ -f /proc/mounts ]; then
+    fusermount -u "$MOUNT_DIR" 2>/dev/null || true
+else
+    umount "$MOUNT_DIR" 2>/dev/null || true
+fi
+code=0
+err=$("$DCX" exec --workspace-folder "$WS" -- true 2>&1) || code=$?
+[ "$code" -ne 0 ] && pass "exec with stale mount exits non-zero" || fail "exec with stale mount should fail"
+assert_contains "exec with stale mount shows stale error" "$err" "Mount is stale"
+# Remount so subsequent tests can proceed.
+"$DCX" up --workspace-folder "$WS" 2>/dev/null
+
 # --- Progress output on stderr ---
 echo "--- progress output ---"
 stderr_out=$("$DCX" exec --workspace-folder "$WS" -- true 2>&1 >/dev/null) || true
