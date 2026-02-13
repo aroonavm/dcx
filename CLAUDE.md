@@ -30,5 +30,5 @@ A phase is complete when:
 After each phase is over, check that the current state of the code exactly follows the spec. Then update this status and commit the code.
 
 Phase: 9
-Last completed: Phase 8 — Signal Handling + Progress Output
-Next: Phase 9 — E2E Tests + Polish (see `specs/TASKS.md`)
+Last completed: Phase 9 — Shell Completions + E2E Tests
+Next: (see `specs/TASKS.md` for any remaining phases)
