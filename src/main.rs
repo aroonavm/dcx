@@ -9,6 +9,7 @@ mod mount_table;
 mod naming;
 mod platform;
 mod status;
+mod up;
 mod workspace;
 
 use clap::Parser;
@@ -25,9 +26,12 @@ fn home_dir() -> std::path::PathBuf {
 fn main() {
     let cli = cli::Cli::parse();
     match cli.command {
-        cli::Commands::Up { .. } => {
-            eprintln!("dcx up: not yet implemented");
-            std::process::exit(exit_codes::RUNTIME_ERROR);
+        cli::Commands::Up {
+            workspace_folder,
+            dry_run,
+            yes,
+        } => {
+            std::process::exit(up::run_up(&home_dir(), workspace_folder, dry_run, yes));
         }
         cli::Commands::Exec { .. } => {
             eprintln!("dcx exec: not yet implemented");

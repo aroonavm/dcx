@@ -29,6 +29,6 @@ A phase is complete when:
 ## Current status
 After each phase is over, check that the current state of the code exactly follows the spec. Then update this status and commit the code.
 
-Phase: 5
-Last completed: Phase 4 — dcx doctor + dcx status
-Next: Phase 5 — dcx up (see `specs/TASKS.md`)
+Phase: 6
+Last completed: Phase 5 — dcx up
+Next: Phase 6 — dcx exec + dcx down (see `specs/TASKS.md`)

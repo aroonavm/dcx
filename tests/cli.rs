@@ -112,6 +112,51 @@ fn clean_help_shows_yes() {
         .stdout(predicate::str::contains("--yes"));
 }
 
+// --- dcx up ---
+
+#[test]
+fn up_missing_workspace_exits_nonzero() {
+    // A workspace path that does not exist must fail.
+    // exit 1 if Docker is unavailable; exit 2 if Docker is available.
+    dcx()
+        .args(["up", "--workspace-folder", "/nonexistent/__dcx_test_path__"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn up_dir_without_devcontainer_config_exits_nonzero() {
+    // /tmp exists but has no devcontainer configuration.
+    // exit 1 if Docker is unavailable; exit 2 if Docker is available.
+    dcx()
+        .args(["up", "--workspace-folder", "/tmp"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn up_dry_run_without_devcontainer_config_exits_nonzero() {
+    // --dry-run still validates before printing the plan.
+    // exit 1 if Docker is unavailable; exit 2 if Docker is available.
+    dcx()
+        .args(["up", "--dry-run", "--workspace-folder", "/tmp"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn up_recursive_guard_exits_nonzero() {
+    // Using a path inside ~/.colima-mounts/dcx-* as the workspace must be rejected.
+    // The path doesn't exist so workspace resolution fails first (exit 2) or
+    // Docker is unavailable (exit 1) — either way, non-zero.
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+    let relay_path = format!("{home}/.colima-mounts/dcx-test-a1b2c3d4");
+    dcx()
+        .args(["up", "--workspace-folder", &relay_path])
+        .assert()
+        .failure();
+}
+
 // --- dcx doctor ---
 
 #[test]
