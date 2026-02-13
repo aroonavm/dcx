@@ -27,6 +27,18 @@ pub fn run_capture<S: AsRef<OsStr>>(prog: &str, args: &[S]) -> Result<CaptureOut
     })
 }
 
+/// Format a command as a human-readable string for `--dry-run` output.
+///
+/// Returns `"<prog> <arg1> <arg2> ..."`. Callers are responsible for prefixing
+/// with context (e.g. `"Would run: {}"`).
+pub fn display_cmd<S: AsRef<OsStr>>(prog: &str, args: &[S]) -> String {
+    let mut parts = vec![prog.to_string()];
+    for arg in args {
+        parts.push(arg.as_ref().to_string_lossy().into_owned());
+    }
+    parts.join(" ")
+}
+
 /// Run `prog` with `args`, streaming stdout and stderr to the parent process.
 ///
 /// Returns the child's exit code, or `Err` if the process could not be spawned.
@@ -44,6 +56,32 @@ pub fn run_stream<S: AsRef<OsStr>>(prog: &str, args: &[S]) -> Result<i32, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- display_cmd ---
+
+    #[test]
+    fn display_cmd_prog_only() {
+        assert_eq!(display_cmd("docker", &[] as &[&str]), "docker");
+    }
+
+    #[test]
+    fn display_cmd_with_args() {
+        assert_eq!(
+            display_cmd("devcontainer", &["up", "--workspace-folder", "/tmp/test"]),
+            "devcontainer up --workspace-folder /tmp/test"
+        );
+    }
+
+    #[test]
+    fn display_cmd_path_with_spaces() {
+        assert_eq!(
+            display_cmd(
+                "bindfs",
+                &["--no-allow-other", "/my project/path", "/relay/mount"]
+            ),
+            "bindfs --no-allow-other /my project/path /relay/mount"
+        );
+    }
 
     // --- run_capture ---
 
