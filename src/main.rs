@@ -2,14 +2,25 @@ mod categorize;
 mod cli;
 mod cmd;
 mod docker;
+mod doctor;
 mod exit_codes;
 mod format;
 mod mount_table;
 mod naming;
 mod platform;
+mod status;
 mod workspace;
 
 use clap::Parser;
+
+fn home_dir() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            eprintln!("HOME environment variable is not set");
+            std::process::exit(exit_codes::RUNTIME_ERROR);
+        })
+}
 
 fn main() {
     let cli = cli::Cli::parse();
@@ -31,12 +42,10 @@ fn main() {
             std::process::exit(exit_codes::RUNTIME_ERROR);
         }
         cli::Commands::Status => {
-            eprintln!("dcx status: not yet implemented");
-            std::process::exit(exit_codes::RUNTIME_ERROR);
+            std::process::exit(status::run_status(&home_dir()));
         }
         cli::Commands::Doctor => {
-            eprintln!("dcx doctor: not yet implemented");
-            std::process::exit(exit_codes::RUNTIME_ERROR);
+            std::process::exit(doctor::run_doctor(&home_dir()));
         }
         cli::Commands::External(args) => {
             let code =

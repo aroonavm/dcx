@@ -112,6 +112,47 @@ fn clean_help_shows_yes() {
         .stdout(predicate::str::contains("--yes"));
 }
 
+// --- dcx doctor ---
+
+#[test]
+fn doctor_exits_zero_or_one_not_two() {
+    // In the test environment not all prerequisites will be installed.
+    // What matters: dcx doctor must never exit 2 (clap parse error).
+    let code = dcx().arg("doctor").output().unwrap().status.code();
+    assert_ne!(code, Some(2), "dcx doctor must not exit with a clap error");
+}
+
+#[test]
+fn doctor_always_prints_checking_prerequisites() {
+    // The "Checking prerequisites..." header must appear regardless of check results.
+    dcx()
+        .arg("doctor")
+        .assert()
+        .stdout(predicate::str::contains("Checking prerequisites..."));
+}
+
+// --- dcx status ---
+
+#[test]
+fn status_exits_zero_or_one_not_two() {
+    // docker may not be running in CI; exit 0 or 1 are both fine.
+    let code = dcx().arg("status").output().unwrap().status.code();
+    assert_ne!(code, Some(2), "dcx status must not exit with a clap error");
+}
+
+#[test]
+fn status_output_is_table_or_no_workspaces() {
+    // When docker is not running status exits 1 and prints to stderr.
+    // When docker is running with no dcx mounts it prints "No active workspaces."
+    // Either way, stdout should not contain a clap error message.
+    let out = dcx().arg("status").output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("error:"),
+        "dcx status stdout should not contain a clap error: {stdout}"
+    );
+}
+
 // --- Pass-through ---
 
 #[test]
