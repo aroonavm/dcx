@@ -81,7 +81,7 @@ Subprocess calls are direct and explicit — any errors from subprocess failures
 
 - **Simple over sophisticated**: direct subprocess calls, no trait abstractions
 - **Fail fast**: on errors; no graceful recovery or retries (exception: `dcx clean` continues on individual failures to maximize cleanup)
-- **Integration tests**: via shell; no complex unit test infrastructure
+- **Test pyramid**: unit tests for pure logic, `assert_cmd` integration tests against the binary, shell E2E for full infrastructure (see [testing.md](testing.md))
 - **Code clarity**: obvious to readers, not clever
 
 ### Acceptable Trade-offs
