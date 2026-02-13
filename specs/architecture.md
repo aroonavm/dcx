@@ -307,10 +307,10 @@ dcx doctor
 2. Print results:
    ```
    Checking prerequisites...
-     ✓ bindfs installed (v1.17.2)
-     ✓ devcontainer CLI installed (v0.71.0)
-     ✓ Docker available (Docker 27.1.1)
-     ✓ Colima running (v0.8.1)
+     ✓ bindfs installed (1.17.2)
+     ✓ devcontainer CLI installed (0.71.0)
+     ✓ Docker available (27.1.1)
+     ✓ Colima running (0.8.1)
      ✓ ~/.colima-mounts exists on host
      ✓ ~/.colima-mounts mounted in VM (writable)
 
