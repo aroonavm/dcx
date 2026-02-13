@@ -130,13 +130,13 @@ dcx up --yes                              # Skip confirmation for non-owned dire
 2. Resolve workspace path to absolute path (handle symlinks, `.`, `..`)
 3. If workspace path starts with `~/.colima-mounts/dcx-`, fail with "Cannot use a dcx-managed mount point as a workspace. Use the original workspace path instead." (exit code 2)
 4. Check for devcontainer configuration (`.devcontainer/devcontainer.json` or `.devcontainer.json`); fail fast with "No devcontainer configuration found in <path>." (exit code 2)
-5. Auto-create `~/.colima-mounts/` if it doesn't exist (system default permissions)
-6. Compute mount point using hash-based naming scheme
-7. **If `--dry-run`:** print what would happen and exit:
+5. Compute mount point using hash-based naming scheme
+6. **If `--dry-run`:** print what would happen and exit (no filesystem changes):
    ```
    Would mount: /home/user/myproject → ~/.colima-mounts/dcx-myproject-a1b2c3d4
    Would run: devcontainer up --workspace-folder ~/.colima-mounts/dcx-myproject-a1b2c3d4
    ```
+7. Auto-create `~/.colima-mounts/` if it doesn't exist (system default permissions)
 8. If mount point already exists:
    - Verify mount is healthy (test accessibility, e.g., `ls` the mount point)
    - If healthy:
