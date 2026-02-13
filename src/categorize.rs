@@ -17,6 +17,21 @@ pub enum MountStatus {
 /// - `is_fuse_mounted`: the target appears in the mount table as a bindfs entry
 /// - `is_accessible`: stat/ls of the mount point succeeds
 /// - `has_container`: a running container is associated with this mount
+///
+/// # Design note — Stale vs Empty
+///
+/// The spec prose defines "Stale mount" as "bindfs mount doesn't exist or is unhealthy"
+/// (architecture.md §"dcx clean"). In practice, "doesn't exist" (no mount table entry)
+/// is indistinguishable from "was never mounted" without a state file — which the spec
+/// explicitly rejects. We therefore split the spec's "Stale" into two cases:
+///
+/// - `is_fuse_mounted && !is_accessible` → `Stale`: entry is in the mount table but
+///   inaccessible (FUSE process died). Caller should attempt `fusermount -u` before removal.
+/// - `!is_fuse_mounted` → `Empty`: no mount table entry; just a leftover directory.
+///   Caller can remove it directly without an unmount attempt.
+///
+/// Both cases are cleaned by `dcx clean`; the only behavioral difference is whether a
+/// (likely-to-fail) unmount is attempted first.
 pub fn categorize(is_fuse_mounted: bool, is_accessible: bool, has_container: bool) -> MountStatus {
     if !is_fuse_mounted {
         return MountStatus::Empty;

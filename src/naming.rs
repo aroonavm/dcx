@@ -92,6 +92,12 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_preserves_exactly_30_chars() {
+        let exactly_30 = "a".repeat(30);
+        assert_eq!(sanitize_name(&exactly_30), exactly_30);
+    }
+
+    #[test]
     fn sanitize_empty_returns_empty() {
         assert_eq!(sanitize_name(""), "");
     }
@@ -169,6 +175,14 @@ mod tests {
     }
 
     #[test]
+    fn mount_name_known_full_output() {
+        // Pins the complete mount name format end-to-end.
+        // SHA256("/home/user/myproject")[..8] == "f227ecb4" (verified by hash_known_value test).
+        let path = Path::new("/home/user/myproject");
+        assert_eq!(mount_name(path), "dcx-myproject-f227ecb4");
+    }
+
+    #[test]
     fn mount_name_is_deterministic() {
         let path = Path::new("/home/user/myproject");
         assert_eq!(mount_name(path), mount_name(path));
@@ -199,6 +213,15 @@ mod tests {
         let relay = Path::new("/home/user/.colima-mounts");
         let path = Path::new("/home/user/something");
         assert!(!is_dcx_managed_path(path, relay));
+    }
+
+    #[test]
+    fn is_dcx_managed_true_for_path_inside_dcx_subdir() {
+        // A file/dir nested inside a dcx mount must also be detected.
+        // Spec: "if workspace path starts with ~/.colima-mounts/dcx-"
+        let relay = Path::new("/home/user/.colima-mounts");
+        let path = Path::new("/home/user/.colima-mounts/dcx-foo-a1b2c3d4/subdir");
+        assert!(is_dcx_managed_path(path, relay));
     }
 
     #[test]
