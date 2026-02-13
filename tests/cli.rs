@@ -135,6 +135,52 @@ fn up_dir_without_devcontainer_config_exits_nonzero() {
 }
 
 #[test]
+fn up_dry_run_with_valid_workspace_prints_plan() {
+    // With a valid workspace+config, --dry-run must print the plan and exit 0.
+    // If Docker is unavailable the command exits 1 before reaching dry-run; in
+    // that case we only assert the exit code, not the output.
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    workspace
+        .child(".devcontainer/devcontainer.json")
+        .touch()
+        .unwrap();
+    let out = dcx()
+        .args([
+            "up",
+            "--dry-run",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let exit_code = out.status.code();
+    if exit_code == Some(0) {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("Would mount:"),
+            "dry-run output must contain 'Would mount:', got: {stdout}"
+        );
+        assert!(
+            stdout.contains("Would run:"),
+            "dry-run output must contain 'Would run:', got: {stdout}"
+        );
+        assert!(
+            stdout.contains("devcontainer up"),
+            "dry-run output must mention 'devcontainer up', got: {stdout}"
+        );
+    } else {
+        // Docker not available — exit 1 is acceptable; nothing to assert about output.
+        assert_eq!(
+            exit_code,
+            Some(1),
+            "expected exit 0 (plan printed) or exit 1 (no Docker), got: {exit_code:?}"
+        );
+    }
+}
+
+#[test]
 fn up_dry_run_without_devcontainer_config_exits_nonzero() {
     // --dry-run still validates before printing the plan.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.
