@@ -104,7 +104,7 @@ See: `architecture.md` § "dcx exec" and "dcx down" behavior sections
 | Command | Key behaviors |
 |---------|-------------|
 | `dcx exec` | Verify mount exists + healthy → rewrite path → delegate |
-| `dcx down` | Delegate `devcontainer down` → unmount → remove dir. Idempotent for missing mounts. |
+| `dcx down` | `docker stop` container → unmount → remove dir. Idempotent for missing mounts. |
 
 Integration tests: no mount found, workspace doesn't exist, recursive mount guard, "Nothing to do" case.
 
@@ -114,8 +114,9 @@ Integration tests: no mount found, workspace doesn't exist, recursive mount guar
 
 See: `architecture.md` § "dcx clean" behavior section
 
-- Safe mode (default): skip active mounts, clean orphaned/stale/empty, continue on failure
-- `--all` mode: prompt if active containers found, `--yes` to skip, stop + unmount everything
+- Default mode: clean current workspace only (full cleanup: stop + rm + rmi + unmount + rmdir)
+- `--all` mode: clean all dcx-managed workspaces (full cleanup for each)
+- Both modes prompt if running containers will be stopped, `--yes` to skip
 - Summary output format per spec
 
 Integration tests: "Nothing to clean.", confirmation prompt, `--yes` bypass, continue-on-failure behavior.
@@ -148,3 +149,72 @@ Full lifecycle tests per command + edge cases.
 - Shell completions via `clap_complete`
 - Audit error messages and exit codes against `architecture.md` § "Exit Codes"
 - Cross-platform verification (Linux + macOS)
+
+---
+
+## Phase 10: Fix container lifecycle (`dcx down` + `dcx clean`) ✅
+
+See: `architecture.md` § "dcx down", "dcx clean". `failure-recovery.md` § "When to Use dcx clean".
+
+### Task 1: Update specs ✅
+
+### Task 2: Extract Docker helpers into `src/docker.rs` ✅
+
+Moved `query_container()` from `src/status.rs` to `src/docker.rs`.
+Updated `src/status.rs` and `src/clean.rs` imports.
+
+Added to `src/docker.rs`:
+
+| Function | Signature | Behavior |
+|----------|-----------|----------|
+| `query_container` | `(mount_point: &Path) -> Option<String>` | Running containers only (`docker ps`). |
+| `query_container_any` | `(mount_point: &Path) -> Option<String>` | Includes stopped (`docker ps -a`). |
+| `stop_container` | `(mount_point: &Path) -> Result<(), String>` | `query_container` → `docker stop`. Idempotent. |
+| `remove_container` | `(container_id: &str) -> Result<(), String>` | `docker rm`. |
+| `remove_container_image` | `(container_id: &str) -> Result<(), String>` | `docker inspect` → `docker rmi`. |
+
+All query functions: take first line only (handle multi-ID output).
+
+### Task 3: Rewrite `src/down.rs` step 7 ✅
+
+Replaced inline 30-line docker ps/stop match block with:
+```rust
+if let Err(e) = docker::stop_container(&mount_point) {
+    eprintln!("{e}");
+    return exit_codes::RUNTIME_ERROR;
+}
+```
+
+Fixed SIGINT comment: `docker stop` uses `run_capture`, signal not forwarded.
+Check `interrupted` flag after call returns.
+
+### Task 4: Update `src/cli.rs` + `src/main.rs` ✅
+
+Added `workspace_folder: Option<PathBuf>` to `Clean` struct.
+Updated `--all` help text: `"Clean all dcx-managed workspaces (default: current workspace only)"`.
+Updated `main.rs` dispatch to pass `workspace_folder`.
+New signature: `run_clean(home, workspace_folder, all, yes)`.
+
+### Task 5: Redesign `src/clean.rs` per spec ✅
+
+**Default mode (no `--all`):**
+- Resolve workspace path
+- Compute mount point
+- Find container (running or stopped)
+- Prompt if running container found (unless `--yes`)
+- Full cleanup: stop → rm container → rmi image → unmount → rmdir
+- Print result. "Nothing to clean." if nothing exists.
+
+**`--all` mode:**
+- Scan all `dcx-*` entries
+- Find running containers for confirmation
+- Prompt if running containers found (unless `--yes`)
+- Full cleanup for each entry: stop → rm → rmi → unmount → rmdir
+- Continue on failure, print summary
+
+Rewrote `clean_one` to always do full cleanup.
+
+### Task 6: Run `make check` + E2E test ✅
+
+- `make check` passes (147 unit + 41 integration tests, clippy, fmt)
+- Ready for E2E validation

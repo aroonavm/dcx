@@ -2,34 +2,21 @@
 
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-
 use std::sync::atomic::Ordering;
 
-use crate::categorize::{self, MountStatus};
 use crate::cmd;
 use crate::docker;
 use crate::exit_codes;
 use crate::format::{self, CleanEntry};
-use crate::mount_table;
-use crate::naming::relay_dir;
+use crate::naming::{mount_name, relay_dir};
 use crate::platform;
 use crate::progress;
 use crate::signals;
-use crate::status::query_container;
+use crate::workspace::resolve_workspace;
 
 // ── Pure functions ─────────────────────────────────────────────────────────────
 
-/// Map a `MountStatus` to the "was:" label shown in the clean summary.
-pub fn was_label(status: &MountStatus) -> &'static str {
-    match status {
-        MountStatus::Active => "running",
-        MountStatus::Orphaned => "orphaned",
-        MountStatus::Stale => "stale",
-        MountStatus::Empty => "empty dir",
-    }
-}
-
-/// Build the warning text for the `--all` confirmation prompt.
+/// Build the warning text for the confirmation prompt when stopping containers.
 ///
 /// `entries` is a list of `(workspace_display, mount_name, container_id)` tuples.
 /// The caller is responsible for printing the final "Continue? [y/N] " prompt.
@@ -50,14 +37,7 @@ pub fn confirm_prompt(entries: &[(String, String, String)]) -> String {
     lines.join("\n")
 }
 
-// ── Internal helpers ──────────────────────────────────────────────────────────
-
-struct EntryInfo {
-    path: PathBuf,
-    workspace: Option<String>,
-    status: MountStatus,
-    container: Option<String>,
-}
+// ── Internal helpers ───────────────────────────────────────────────────────────
 
 /// Scan `relay` for all `dcx-*` subdirectories and return their sorted paths.
 fn scan_relay(relay: &Path) -> Vec<PathBuf> {
@@ -101,48 +81,37 @@ fn remove_mount_dir(mount_point: &Path) -> Result<(), String> {
         .map_err(|e| format!("Failed to remove {}: {e}", mount_point.display()))
 }
 
-/// Perform cleanup for a single relay entry.
+/// Perform full cleanup for a single mount entry: stop container, remove container, remove image, unmount, remove dir.
 ///
-/// Returns the action label on success (e.g., `"unmounted"`, `"removed"`).
-fn clean_one(mount_point: &Path, status: &MountStatus) -> Result<&'static str, String> {
-    match status {
-        MountStatus::Active => {
-            let mount_str = mount_point.to_string_lossy();
-            let code = cmd::run_stream(
-                "devcontainer",
-                &["down", "--workspace-folder", mount_str.as_ref()],
-            )
-            .unwrap_or(exit_codes::PREREQ_NOT_FOUND);
-            if code != 0 {
-                return Err(format!("devcontainer down failed (exit {code})"));
-            }
-            do_unmount(mount_point)?;
-            remove_mount_dir(mount_point)?;
-            Ok("stopped, unmounted")
-        }
-        MountStatus::Orphaned => {
-            do_unmount(mount_point)?;
-            remove_mount_dir(mount_point)?;
-            Ok("unmounted")
-        }
-        MountStatus::Stale => {
-            do_unmount(mount_point)?;
-            remove_mount_dir(mount_point)?;
-            Ok("unmounted")
-        }
-        MountStatus::Empty => {
-            remove_mount_dir(mount_point)?;
-            Ok("removed")
-        }
+/// `container_id` is optional; if provided, it will be used directly. If None, we skip remove_container and remove_image.
+/// Returns the action label on success.
+fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<String, String> {
+    // Stop the container (idempotent if not found)
+    docker::stop_container(mount_point)?;
+
+    // Remove container if we have its ID
+    if let Some(id) = container_id {
+        docker::remove_container(id)?;
+        // Remove the image
+        docker::remove_container_image(id)?;
     }
+
+    // Unmount and remove directory
+    do_unmount(mount_point)?;
+    remove_mount_dir(mount_point)?;
+
+    Ok("cleaned".to_string())
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 /// Run `dcx clean`.
 ///
+/// Without `--all`: cleans only the current workspace.
+/// With `--all`: cleans all dcx-managed workspaces.
+///
 /// Returns the exit code that `main` should pass to `std::process::exit`.
-pub fn run_clean(home: &Path, all: bool, yes: bool) -> i32 {
+pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes: bool) -> i32 {
     // Install SIGINT handler. If Ctrl+C arrives while an unmount is in progress,
     // we finish that entry's cleanup then exit (remaining entries are skipped).
     let interrupted = signals::interrupted_flag();
@@ -153,161 +122,177 @@ pub fn run_clean(home: &Path, all: bool, yes: bool) -> i32 {
         return exit_codes::RUNTIME_ERROR;
     }
 
-    // 2. Scan relay dir for dcx-* entries.
     progress::step("Scanning relay directory...");
     let relay = relay_dir(home);
-    let entry_paths = scan_relay(&relay);
 
-    // 3. Categorize each entry.
-    let table = platform::read_mount_table().unwrap_or_default();
-    let entries: Vec<EntryInfo> = entry_paths
-        .iter()
-        .map(|p| {
-            let workspace = mount_table::find_mount_source(&table, p).map(str::to_string);
-            let is_fuse_mounted = workspace.is_some();
-            let is_accessible = p.metadata().is_ok();
-            let container = query_container(p);
-            let has_container = container.is_some();
-            EntryInfo {
-                path: p.clone(),
-                workspace,
-                status: categorize::categorize(is_fuse_mounted, is_accessible, has_container),
-                container,
+    // Mode 1: Default (no `--all`) — clean current workspace only
+    if !all {
+        // Resolve workspace path
+        let workspace = match resolve_workspace(workspace_folder.as_deref()) {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("Workspace directory does not exist.");
+                return exit_codes::USAGE_ERROR;
             }
-        })
-        .collect();
+        };
 
-    // 4. Count active mounts.
-    let active_count = entries
-        .iter()
-        .filter(|e| e.status == MountStatus::Active)
-        .count();
+        // Compute mount point
+        let name = mount_name(&workspace);
+        let mount_point = relay.join(&name);
 
-    // 5. In --all mode, prompt if active containers found (unless --yes).
-    if all && active_count > 0 && !yes {
-        let active_entries: Vec<(String, String, String)> = entries
-            .iter()
-            .filter(|e| e.status == MountStatus::Active)
-            .map(|e| {
-                let ws = e
-                    .workspace
-                    .clone()
-                    .unwrap_or_else(|| "(unknown)".to_string());
-                let mount = e
-                    .path
+        // Check if mount point directory exists; if not, nothing to clean
+        if !mount_point.exists() {
+            println!("Nothing to clean.");
+            return exit_codes::SUCCESS;
+        }
+
+        // Find container (running or stopped)
+        let container_any = docker::query_container_any(&mount_point);
+
+        // If container found and running, check with user
+        #[allow(clippy::collapsible_if)]
+        if let Some(ref container_id) = container_any {
+            if docker::query_container(&mount_point).is_some() && !yes {
+                // Container is running, prompt user
+                let mount_name_str = mount_point
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                let container = e.container.clone().unwrap_or_else(|| "(none)".to_string());
-                (ws, mount, container)
-            })
-            .collect();
-        let prompt_text = confirm_prompt(&active_entries);
-        eprintln!("{prompt_text}");
-        eprint!("\nContinue? [y/N] ");
-        let _ = io::stderr().flush();
-        let stdin = io::stdin();
-        let mut input = String::new();
-        if stdin.lock().read_line(&mut input).is_err() {
-            return exit_codes::RUNTIME_ERROR;
+                let entries = vec![(
+                    workspace.display().to_string(),
+                    mount_name_str,
+                    container_id.clone(),
+                )];
+                let prompt_text = confirm_prompt(&entries);
+                eprintln!("{prompt_text}");
+                eprint!("\nContinue? [y/N] ");
+                let _ = io::stderr().flush();
+                let stdin = io::stdin();
+                let mut input = String::new();
+                if stdin.lock().read_line(&mut input).is_err() {
+                    return exit_codes::RUNTIME_ERROR;
+                }
+                if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                    return exit_codes::USER_ABORTED;
+                }
+            }
         }
-        if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-            return exit_codes::USER_ABORTED;
-        }
-    }
 
-    // 6. Determine entries to clean.
-    let to_clean: Vec<&EntryInfo> = if all {
-        entries.iter().collect()
-    } else {
-        entries
-            .iter()
-            .filter(|e| e.status != MountStatus::Active)
-            .collect()
-    };
-
-    let active_left = if all { 0 } else { active_count };
-
-    // 7. If nothing to clean, exit early.
-    if to_clean.is_empty() {
-        println!("Nothing to clean.");
-        return exit_codes::SUCCESS;
-    }
-
-    // 8. Process each entry, continuing on failure.
-    let mut cleaned: Vec<CleanEntry> = Vec::new();
-    let mut failures: Vec<String> = Vec::new();
-
-    for entry in &to_clean {
-        let mount_name_str = entry
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        progress::step(&format!("Cleaning {mount_name_str}..."));
-        match clean_one(&entry.path, &entry.status) {
+        // Clean this mount
+        match clean_one(&mount_point, container_any.as_deref()) {
             Ok(action) => {
-                cleaned.push(CleanEntry {
-                    workspace: entry.workspace.clone(),
-                    mount: mount_name_str,
-                    was: was_label(&entry.status).to_string(),
-                    action: action.to_string(),
-                });
+                println!(
+                    "Cleaned {}  →  {}  ({})",
+                    workspace.display(),
+                    mount_point
+                        .file_name()
+                        .map(|n| n.to_string_lossy())
+                        .unwrap_or_default(),
+                    action
+                );
+                exit_codes::SUCCESS
             }
             Err(e) => {
-                failures.push(format!("{}: {e}", entry.path.display()));
+                eprintln!("Error: {e}");
+                exit_codes::RUNTIME_ERROR
             }
         }
-        // If SIGINT arrived during this entry's cleanup, finish it (already done above)
-        // and exit without processing remaining entries.
-        if interrupted.load(Ordering::Relaxed) {
-            eprintln!("Signal received, finishing current unmount...");
-            break;
-        }
-    }
-
-    // 9. Print summary.
-    if !cleaned.is_empty() {
-        println!("{}", format::format_clean_summary(&cleaned, active_left));
-    }
-
-    // 10. Print failures.
-    for f in &failures {
-        eprintln!("Error: {f}");
-    }
-
-    if failures.is_empty() {
-        exit_codes::SUCCESS
     } else {
-        exit_codes::RUNTIME_ERROR
+        // Mode 2: `--all` — clean all dcx-managed workspaces
+        let entry_paths = scan_relay(&relay);
+
+        if entry_paths.is_empty() {
+            println!("Nothing to clean.");
+            return exit_codes::SUCCESS;
+        }
+
+        // Collect running containers for confirmation
+        let running_containers: Vec<(String, String, String)> = entry_paths
+            .iter()
+            .filter_map(|mount_point| {
+                if let Some(container_id) = docker::query_container(mount_point) {
+                    let mount_name_str = mount_point
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    Some(("(unknown)".to_string(), mount_name_str, container_id))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Prompt if there are running containers (unless --yes)
+        if !running_containers.is_empty() && !yes {
+            let prompt_text = confirm_prompt(&running_containers);
+            eprintln!("{prompt_text}");
+            eprint!("\nContinue? [y/N] ");
+            let _ = io::stderr().flush();
+            let stdin = io::stdin();
+            let mut input = String::new();
+            if stdin.lock().read_line(&mut input).is_err() {
+                return exit_codes::RUNTIME_ERROR;
+            }
+            if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                return exit_codes::USER_ABORTED;
+            }
+        }
+
+        // Clean all entries, continuing on failure
+        let mut cleaned: Vec<CleanEntry> = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
+
+        for mount_point in &entry_paths {
+            let mount_name_str = mount_point
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            progress::step(&format!("Cleaning {mount_name_str}..."));
+
+            let container_id = docker::query_container_any(mount_point);
+
+            match clean_one(mount_point, container_id.as_deref()) {
+                Ok(_) => {
+                    cleaned.push(CleanEntry {
+                        workspace: None,
+                        mount: mount_name_str,
+                        was: "mount".to_string(),
+                        action: "cleaned".to_string(),
+                    });
+                }
+                Err(e) => {
+                    failures.push(format!("{}: {e}", mount_point.display()));
+                }
+            }
+
+            // If SIGINT arrived during this entry's cleanup, finish it and exit
+            if interrupted.load(Ordering::Relaxed) {
+                eprintln!("Signal received, finishing current unmount...");
+                break;
+            }
+        }
+
+        // Print summary
+        if !cleaned.is_empty() {
+            println!("{}", format::format_clean_summary(&cleaned, 0));
+        }
+
+        // Print failures
+        for f in &failures {
+            eprintln!("Error: {f}");
+        }
+
+        if failures.is_empty() {
+            exit_codes::SUCCESS
+        } else {
+            exit_codes::RUNTIME_ERROR
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- was_label ---
-
-    #[test]
-    fn was_label_active_is_running() {
-        assert_eq!(was_label(&MountStatus::Active), "running");
-    }
-
-    #[test]
-    fn was_label_orphaned_is_orphaned() {
-        assert_eq!(was_label(&MountStatus::Orphaned), "orphaned");
-    }
-
-    #[test]
-    fn was_label_stale_is_stale() {
-        assert_eq!(was_label(&MountStatus::Stale), "stale");
-    }
-
-    #[test]
-    fn was_label_empty_is_empty_dir() {
-        assert_eq!(was_label(&MountStatus::Empty), "empty dir");
-    }
 
     // --- confirm_prompt ---
 

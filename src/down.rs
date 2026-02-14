@@ -33,8 +33,8 @@ pub fn workspace_missing_error() -> &'static str {
 /// Returns the exit code that `main` should pass to `std::process::exit`.
 pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
     // Install SIGINT handler. If Ctrl+C arrives during container stop (step 7),
-    // devcontainer is killed (same process group) and run_stream returns non-zero,
-    // so we bail at the code != 0 check. If Ctrl+C arrives during unmount (step 8),
+    // docker stop uses run_capture, so signal is not forwarded. Check interrupted
+    // flag after the call returns. If Ctrl+C arrives during unmount (step 8),
     // we log a message and complete the unmount before exiting.
     let interrupted = signals::interrupted_flag();
 
@@ -80,52 +80,12 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
     }
 
     // 7. Stop the container using Docker.
-    // Find and stop the container associated with this workspace.
+    // Note: docker::stop_container uses run_capture (not run_stream), so SIGINT is not
+    // forwarded to docker stop. Check interrupted flag after the call returns.
     progress::step("Stopping devcontainer...");
-    let mount_point_str = mount_point.to_string_lossy().to_string();
-
-    // Find container by label: devcontainer.local_folder matches our mount point
-    let find_result = cmd::run_capture(
-        "docker",
-        &[
-            "ps",
-            "-a",
-            "--filter",
-            &format!("label=devcontainer.local_folder={}", mount_point_str),
-            "--format",
-            "{{.ID}}",
-        ],
-    );
-
-    match find_result {
-        Ok(output) => {
-            if output.status != 0 {
-                eprintln!("Failed to find container: {}", output.stderr.trim());
-                return exit_codes::RUNTIME_ERROR;
-            }
-
-            let container_id = output.stdout.trim();
-            if !container_id.is_empty() {
-                // Stop the container
-                match cmd::run_capture("docker", &["stop", container_id]) {
-                    Ok(stop_output) => {
-                        if stop_output.status != 0 {
-                            eprintln!("Failed to stop container: {}", stop_output.stderr.trim());
-                            return exit_codes::RUNTIME_ERROR;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("{e}");
-                        return exit_codes::RUNTIME_ERROR;
-                    }
-                }
-            }
-            // If container_id is empty, container not running (idempotent)
-        }
-        Err(e) => {
-            eprintln!("{e}");
-            return exit_codes::RUNTIME_ERROR;
-        }
+    if let Err(e) = docker::stop_container(&mount_point) {
+        eprintln!("{e}");
+        return exit_codes::RUNTIME_ERROR;
     }
 
     // 8. Unmount bindfs. If SIGINT arrived between steps 7 and 8 (or during unmount),

@@ -194,51 +194,57 @@ dcx down --workspace-folder /path/to/project
 4. If workspace path starts with `~/.colima-mounts/dcx-`, fail with "Cannot use a dcx-managed mount point as a workspace. Use the original workspace path instead." (exit code 2)
 5. Compute mount point from workspace path (same hash as `dcx up`)
 6. If no mount found: print "No mount found for <path>. Nothing to do." and exit (exit code 0)
-7. Delegate to `devcontainer down --workspace-folder <rewritten-path>` to stop the container
+7. Stop the container via `docker stop`, finding it by the `devcontainer.local_folder=<rewritten-path>` label. If no running container is found, continue (idempotent). The container is left stopped (not removed) — `dcx clean` handles full removal.
 8. Unmount `bindfs` (`fusermount -u` on Linux, `umount` on macOS)
 9. Remove mount directory
 
-**Signal handling:** If SIGINT arrives during step 7 (container stop), bail immediately. If SIGINT arrives during step 8 (unmount in progress), log "Signal received, finishing unmount..." and complete the unmount before exiting.
+**Signal handling:** If SIGINT arrives during step 7 (container stop), `docker stop` runs to completion (captured, not streamed). Check the interrupted flag after step 7 completes and bail before unmount if set. If SIGINT arrives during step 8 (unmount in progress), log "Signal received, finishing unmount..." and complete the unmount before exiting.
 
 **Idempotent for missing mounts:** Safe to call multiple times when mount was never created. If no mount found, prints informational message and exits cleanly (exit code 0). If workspace directory is deleted, fails with error — use `dcx clean` to recover.
 
-### `dcx clean` — Clean up stale mounts
+### `dcx clean` — Full cleanup of container, image, and mount
 
 **Usage:**
 ```bash
-dcx clean                # Remove orphaned, stale, and empty mounts only (safe default)
-dcx clean --all          # Remove everything including active mounts
-dcx clean --all --yes    # Remove everything, skip confirmation prompt
+dcx clean                # Clean current directory's devcontainer
+dcx clean --yes          # Clean current directory, skip confirmation
+dcx clean --all          # Clean ALL dcx-managed devcontainers
+dcx clean --all --yes    # Clean all, skip confirmation
 ```
 
 **Behavior:**
+
 1. Validate Docker/Colima is available; fail fast with "Docker is not available. Is Colima running?" (exit code 1)
-2. Iterate all `dcx-*` entries in `~/.colima-mounts/`
-3. Categorize each entry:
-   - **Active mount** — healthy bindfs mount with running container
-   - **Orphaned mount** — healthy bindfs mount but no running container
-   - **Stale mount** — bindfs mount doesn't exist or is unhealthy
-   - **Empty directory** — just a leftover folder
 
-**Without `--all` (default — safe mode):**
+**Without `--all` (default — current workspace):**
 
-4. Skip active mounts entirely (leave running containers untouched)
-5. For each non-active entry:
-   - Orphaned mount: unmount bindfs (`fusermount -u` on Linux, `umount` on macOS), then remove directory
-   - Stale mount: unmount bindfs (regular, not lazy), then remove directory
-   - Empty directory: remove
-6. **Continue on failure:** If any individual mount fails, log the error and continue with remaining mounts
-7. Print summary:
+2. Resolve workspace path (current directory or `--workspace-folder`)
+3. Compute mount point from workspace path (same hash as `dcx up`)
+4. If no mount found and no stopped container found: print "Nothing to clean for <path>." and exit (exit code 0)
+5. If a running container is found: prompt for confirmation. `--yes` skips the prompt.
    ```
-   Cleaned 3 mounts (2 active mounts left untouched):
-     /home/user/project-b  →  dcx-project-b-e5f6g7h8    was: orphaned    → unmounted
-     dcx-project-c-i9j0k1l2                              was: stale       → unmounted
-     dcx-old-thing-m3n4o5p6                               was: empty dir   → removed
+   ⚠ Active container will be stopped:
+     /home/user/myproject  →  dcx-myproject-a1b2c3d4  (container: abc123)
+
+   Continue? [y/N]
+   ```
+6. Full cleanup for this workspace:
+   - Stop running container if any (`docker stop`)
+   - Remove container — running or stopped (`docker rm`)
+   - Remove container's image (`docker rmi`)
+   - Unmount bindfs (`fusermount -u` on Linux, `umount` on macOS) if mounted
+   - Remove mount directory if it exists
+7. Print result:
+   ```
+   Cleaned /home/user/myproject:
+     dcx-myproject-a1b2c3d4  was: running  → stopped, removed
    ```
 
 **With `--all`:**
 
-4. If any active containers found: prompt for confirmation listing container names and host paths. `--yes` skips the confirmation prompt.
+2. Iterate all `dcx-*` entries in `~/.colima-mounts/`
+3. For each entry, find associated containers (running or stopped) via the `devcontainer.local_folder` label
+4. If any running containers found: prompt for confirmation listing all. `--yes` skips the prompt.
    ```
    ⚠ 2 active containers will be stopped:
      - /home/user/project-a  →  dcx-project-a-a1b2c3d4  (container: abc123)
@@ -246,18 +252,19 @@ dcx clean --all --yes    # Remove everything, skip confirmation prompt
 
    Continue? [y/N]
    ```
-5. For each entry:
-   - Active mount: `devcontainer down`, then unmount bindfs, then remove directory
-   - Orphaned mount: unmount bindfs, then remove directory (no container to stop)
-   - Stale mount: unmount bindfs (regular, not lazy), then remove directory
-   - Empty directory: remove
+5. For each entry, full cleanup:
+   - Stop running container if any (`docker stop`)
+   - Remove container — running or stopped (`docker rm`)
+   - Remove container's image (`docker rmi`)
+   - Unmount bindfs if mounted
+   - Remove mount directory
 6. **Continue on failure:** If any individual mount fails, log the error and continue with remaining mounts
-7. Print summary with previous state:
+7. Print summary:
    ```
-   Cleaned 5 mounts:
-     /home/user/project-a  →  dcx-project-a-a1b2c3d4    was: running     → stopped, unmounted
-     /home/user/project-b  →  dcx-project-b-e5f6g7h8    was: orphaned    → unmounted
-     dcx-project-c-i9j0k1l2                              was: stale       → unmounted
+   Cleaned 4 mounts:
+     /home/user/project-a  →  dcx-project-a-a1b2c3d4    was: running     → stopped, removed
+     /home/user/project-b  →  dcx-project-b-e5f6g7h8    was: orphaned    → removed
+     dcx-project-c-i9j0k1l2                              was: stale       → removed
      dcx-old-thing-m3n4o5p6                               was: empty dir   → removed
    ```
    For stale/orphaned mounts, host path may not be recoverable — show mount directory name only.
@@ -265,10 +272,11 @@ dcx clean --all --yes    # Remove everything, skip confirmation prompt
 **Common to both modes:**
 - If any failures occurred, print them at the end and exit with non-zero code
 - If no entries found to clean: print "Nothing to clean." and exit (exit code 0)
+- Container/image removal failures are logged but do not block mount cleanup (continue best-effort)
 
-**Signal handling:** If SIGINT arrives while an unmount is in progress, log "Signal received, finishing current unmount..." and complete the current mount's cleanup before exiting. Remaining mounts are left for the user to re-run `dcx clean`.
+**Signal handling:** If SIGINT arrives while cleanup is in progress, log "Signal received, finishing current cleanup..." and complete the current entry's cleanup before exiting. Remaining entries (in `--all` mode) are left for the user to re-run `dcx clean --all`.
 
-**Design rationale:** `dcx clean` (without `--all`) is always safe to run — it never touches running containers. This makes it suitable for periodic cleanup or cron jobs. `dcx clean --all` is the recovery tool for full resets. Both modes use regular `umount` (not lazy) to ensure deterministic cleanup.
+**Design rationale:** `dcx clean` targets a single workspace for precise cleanup. `dcx clean --all` is the recovery tool for full resets. Both modes do full cleanup: stop container, remove container, remove image, unmount, remove directory. Both use regular `umount` (not lazy) to ensure deterministic cleanup.
 
 ### `dcx status` — Show mounted workspaces
 
@@ -363,7 +371,8 @@ The `dcx` wrapper augments certain `devcontainer` commands with mount management
 dcx up                              # Create mount, start container
 dcx exec -- npm test                # Run command in container
 dcx down                            # Stop container, cleanup mount
-dcx clean                           # Cleanup all dcx-managed mounts and containers
+dcx clean                           # Full cleanup for current workspace (stop, rm, rmi, unmount)
+dcx clean --all                     # Full cleanup for ALL dcx-managed workspaces
 dcx status                          # Show mounted workspaces and container state
 dcx doctor                          # Validate full setup (no side effects)
 

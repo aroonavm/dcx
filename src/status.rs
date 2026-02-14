@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::cmd;
 use crate::docker;
 use crate::exit_codes;
 use crate::format::{StatusRow, format_status_table};
@@ -22,17 +21,6 @@ pub fn mount_state_label(is_mounted: bool, has_container: bool) -> &'static str 
         (true, false) => "orphaned",
         (false, _) => "stale mount",
     }
-}
-
-/// Query `docker ps` for a running container associated with `mount_point`.
-///
-/// Returns the short container ID if a running container is found, or `None` otherwise.
-pub fn query_container(mount_point: &Path) -> Option<String> {
-    let label = format!("label=devcontainer.local_folder={}", mount_point.display());
-    let out =
-        cmd::run_capture("docker", &["ps", "--filter", &label, "--format", "{{.ID}}"]).ok()?;
-    let id = out.stdout.trim().to_string();
-    if id.is_empty() { None } else { Some(id) }
 }
 
 /// Scan `relay` for all `dcx-*` subdirectories and return their sorted paths.
@@ -84,7 +72,7 @@ pub fn run_status(home: &Path) -> i32 {
                 mount_table::find_mount_source(&mount_table, mount_point).map(str::to_string);
             let is_mounted = workspace.is_some();
             let is_accessible = mount_point.metadata().is_ok();
-            let container = query_container(mount_point);
+            let container = docker::query_container(mount_point);
             let has_container = container.is_some();
             let state = mount_state_label(is_mounted && is_accessible, has_container);
             let mount = mount_point

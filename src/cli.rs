@@ -52,7 +52,11 @@ pub enum Commands {
 
     /// Clean up dcx-managed mounts
     Clean {
-        /// Remove everything including active mounts (default: skip active)
+        /// Workspace folder path (default: current directory)
+        #[arg(long, value_name = "PATH")]
+        workspace_folder: Option<PathBuf>,
+
+        /// Clean all dcx-managed workspaces (default: current workspace only)
         #[arg(long)]
         all: bool,
 

@@ -48,8 +48,12 @@ fn main() {
         cli::Commands::Down { workspace_folder } => {
             std::process::exit(down::run_down(&home_dir(), workspace_folder));
         }
-        cli::Commands::Clean { all, yes } => {
-            std::process::exit(clean::run_clean(&home_dir(), all, yes));
+        cli::Commands::Clean {
+            workspace_folder,
+            all,
+            yes,
+        } => {
+            std::process::exit(clean::run_clean(&home_dir(), workspace_folder, all, yes));
         }
         cli::Commands::Status => {
             std::process::exit(status::run_status(&home_dir()));

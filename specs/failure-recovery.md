@@ -272,29 +272,24 @@ colima ssh -- dmesg | tail -20
 ## When to Use `dcx clean`
 
 Run `dcx clean` when:
-- You see stale directories in `~/.colima-mounts/`
-- A container crashed and left a mount
-- A workspace was moved/renamed and the old mount is orphaned
-- System crashed and you need to recover
+- You want to fully tear down the current workspace's devcontainer (stop, remove container + image, unmount)
+- A container crashed and left a mount for this workspace
+- You want to force a fresh rebuild on next `dcx up`
 
 Run `dcx clean --all` when:
-- You want to tear down **all** `dcx`-managed mounts and containers
+- You want to tear down **all** `dcx`-managed mounts, containers, and images
 - Full reset before a Colima reinstall or major configuration change
+- You see stale directories in `~/.colima-mounts/` from old workspaces
 
-**`dcx clean` (default — safe mode):**
-- Finds all `dcx-*` entries in `~/.colima-mounts/`
-- Removes only orphaned, stale, and empty mounts
-- **Leaves active mounts (running containers) untouched**
-- No confirmation prompt needed (safe by default)
-- Continues on individual failures; reports all failures at the end
-- Prints summary showing each mount's previous state and action taken
+**`dcx clean` (default — current workspace):**
+- Targets the current directory's devcontainer (or `--workspace-folder`)
+- Full cleanup: stop container, `docker rm`, `docker rmi`, unmount, remove directory
+- Prompts for confirmation if a running container will be stopped (`--yes` to skip)
 
 **`dcx clean --all`:**
-- Removes everything including active mounts
-- If active containers found: prompts for confirmation (use `--yes` to skip)
-- For active mounts: stops the container via `devcontainer down`, then unmounts
-- For stale mounts: unmounts directly (regular unmount, not lazy)
-- Removes empty leftover directories
+- Targets all `dcx-*` entries in `~/.colima-mounts/`
+- Full cleanup for each: stop container, `docker rm`, `docker rmi`, unmount, remove directory
+- Prompts listing all running containers that will be stopped (`--yes` to skip)
 - Continues on individual failures; reports all failures at the end
 
 ---
@@ -310,9 +305,9 @@ dcx down
 docker stop <container-id>
 ```
 
-### Run `dcx clean` periodically
+### Run `dcx clean --all` periodically
 ```bash
-dcx clean  # Cleans up orphaned/stale mounts, leaves active containers running
+dcx clean --all  # Full cleanup of all dcx-managed mounts, containers, and images
 ```
 
 ### Check your workspace path
