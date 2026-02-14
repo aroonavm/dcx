@@ -35,10 +35,11 @@ fn unescape_proc_field(s: &str) -> String {
     String::from_utf8_lossy(&result).into_owned()
 }
 
-/// Parse `/proc/mounts` text (Linux) and return only `fuse.bindfs` entries.
+/// Parse `/proc/mounts` text (Linux) and return only `fuse.bindfs` or `fuse` entries (dcx mounts).
 ///
 /// Format per line: `<source> <target> <fstype> <options> <dump> <pass>`
 /// Special characters in paths are octal-escaped (e.g. `\040` for space).
+/// Accepts both `fuse.bindfs` (normal case) and `fuse` (stale/orphaned mounts).
 pub fn parse_proc_mounts(text: &str) -> Vec<MountEntry> {
     text.lines()
         .filter_map(|line| {
@@ -46,7 +47,8 @@ pub fn parse_proc_mounts(text: &str) -> Vec<MountEntry> {
             let source = parts.next()?;
             let target = parts.next()?;
             let fstype = parts.next()?;
-            if fstype == "fuse.bindfs" {
+            // Accept both fuse.bindfs (normal dcx mounts) and fuse (stale mounts after interruption)
+            if fstype == "fuse.bindfs" || fstype == "fuse" {
                 Some(MountEntry {
                     source: unescape_proc_field(source),
                     target: unescape_proc_field(target),
@@ -104,7 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn proc_mounts_ignores_non_bindfs_lines() {
+    fn proc_mounts_ignores_non_fuse_lines() {
         let text = "sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0\n\
                     proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n\
                     tmpfs /tmp tmpfs rw 0 0";
@@ -169,6 +171,19 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].source, "/home/user/proj-a");
         assert_eq!(entries[1].source, "/home/user/proj-b");
+    }
+
+    #[test]
+    fn proc_mounts_accepts_fuse_type() {
+        // Stale/orphaned mounts may show as just "fuse" instead of "fuse.bindfs"
+        let text = "/home/user/proj /home/user/.colima-mounts/dcx-proj-abc12345 fuse rw,nosuid,nodev,relatime,user_id=1000,group_id=992,default_permissions 0 0";
+        let entries = parse_proc_mounts(text);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source, "/home/user/proj");
+        assert_eq!(
+            entries[0].target,
+            "/home/user/.colima-mounts/dcx-proj-abc12345"
+        );
     }
 
     // --- parse_mount_output (macOS) ---
