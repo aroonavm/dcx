@@ -133,15 +133,19 @@ pub fn check_relay_exists(home: &Path) -> DoctorCheck {
     }
 }
 
-pub fn check_relay_in_vm() -> DoctorCheck {
+pub fn check_relay_in_vm(home: &Path) -> DoctorCheck {
+    let relay = relay_dir(home);
+    let relay_display = "~/.colima-mounts";
+    let relay_path_vm = relay.to_string_lossy();
+
     // First verify the directory is visible inside the VM.
-    let ls_ok = cmd::run_capture("colima", &["ssh", "--", "ls", "~/.colima-mounts"])
+    let ls_ok = cmd::run_capture("colima", &["ssh", "--", "ls", &relay_path_vm])
         .map(|out| out.status == 0)
         .unwrap_or(false);
 
     if !ls_ok {
         return DoctorCheck {
-            name: "~/.colima-mounts mounted in VM (writable)".to_string(),
+            name: format!("{} mounted in VM (writable)", relay_display),
             passed: false,
             detail: Some(
                 "Add ~/.colima-mounts to Colima mounts in colima.yaml and run: colima start"
@@ -158,19 +162,25 @@ pub fn check_relay_in_vm() -> DoctorCheck {
             "--",
             "sh",
             "-c",
-            "touch ~/.colima-mounts/.dcx-write-test && rm ~/.colima-mounts/.dcx-write-test",
+            &format!(
+                "touch {}/.dcx-write-test && rm {}/.dcx-write-test",
+                relay_path_vm, relay_path_vm
+            ),
         ],
     )
     .map(|out| out.status == 0)
     .unwrap_or(false);
 
     DoctorCheck {
-        name: "~/.colima-mounts mounted in VM (writable)".to_string(),
+        name: format!("{} mounted in VM (writable)", relay_display),
         passed: writable,
         detail: if writable {
             None
         } else {
-            Some("Check Colima mount permissions for ~/.colima-mounts".to_string())
+            Some(format!(
+                "Check Colima mount permissions for {}",
+                relay_display
+            ))
         },
     }
 }
@@ -188,7 +198,7 @@ pub fn run_doctor(home: &Path) -> i32 {
         check_colima(),
         check_unmount_tool(),
         check_relay_exists(home),
-        check_relay_in_vm(),
+        check_relay_in_vm(home),
     ];
     let all_passed = checks.iter().all(|c| c.passed);
     let report = crate::format::format_doctor_report(&checks);
