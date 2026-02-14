@@ -1,5 +1,6 @@
 {
     "name": "dcx Development",
+    "image": "dcx-dev:latest",
     "build": {
         "dockerfile": "Dockerfile",
         "args": {
@@ -11,6 +12,7 @@
     "customizations": {
         "vscode": {
             "extensions": [
+                "anthropic.claude-code",
                 "rust-lang.rust-analyzer",
                 "eamodio.gitlens",
                 "tamasfe.even-better-toml"
@@ -38,10 +40,12 @@
     },
     "remoteUser": "rust",
     "mounts": [
-        "source=dcx-shellhistory-${devcontainerId},target=/commandhistory,type=volume"
+        "source=dcx-shellhistory-${devcontainerId},target=/commandhistory,type=volume",
+        "source=${localEnv:HOME}/.claude,target=/home/rust/.claude,type=bind"
     ],
     "containerEnv": {
-        "RUST_BACKTRACE": "1"
+        "RUST_BACKTRACE": "1",
+        "CLAUDE_CONFIG_DIR": "/home/rust/.claude"
     },
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
     "workspaceFolder": "/workspace"

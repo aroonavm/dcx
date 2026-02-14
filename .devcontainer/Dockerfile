@@ -1,44 +1,53 @@
-FROM rust:latest
+FROM node:latest
 
 ARG TZ
 ENV TZ="$TZ"
 
-# Install development tools
+LABEL org.opencontainers.image.title="dcx Development Container" \
+      org.opencontainers.image.description="Development environment for dcx (Colima workspace mounting wrapper)" \
+      org.opencontainers.image.authors="dcx-team" \
+      project="dcx" \
+      purpose="development"
+
+# Install development tools (removed: build-essential, man-db, nano, vim)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  build-essential \
   git \
   gh \
   curl \
   wget \
   less \
-  nano \
-  vim \
   zsh \
   fzf \
   procps \
   sudo \
-  man-db \
+  bindfs \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for development
-ARG USERNAME=rust
-ARG USER_UID=1000
-ARG USER_GID=$USER_UID
-RUN groupadd --gid $USER_GID $USERNAME && \
-  useradd --uid $USER_UID --gid $USER_GID -m -s /bin/zsh $USERNAME && \
-  echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Install Rust toolchain to a shared location
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
+  /root/.cargo/bin/rustup component add clippy rustfmt && \
+  cp -r /root/.cargo /opt/rust-tools && \
+  chmod -R 755 /opt/rust-tools
+
+# Configure the existing 'node' user (UID 1000) for development
+# Rename group and user, set shell
+RUN groupmod -n rust node && \
+  usermod -l rust node && \
+  usermod -d /home/rust -m rust && \
+  usermod -s /bin/zsh rust && \
+  echo "rust ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Persist shell history
 RUN mkdir -p /commandhistory && \
   touch /commandhistory/.bash_history /commandhistory/.zsh_history && \
-  chown -R $USERNAME:$USERNAME /commandhistory
+  chown -R rust:rust /commandhistory
 
 # Set `DEVCONTAINER` environment variable
 ENV DEVCONTAINER=true
 
 # Create workspace directory
 RUN mkdir -p /workspace && \
-  chown -R $USERNAME:$USERNAME /workspace
+  chown -R rust:rust /workspace
 
 WORKDIR /workspace
 
@@ -49,13 +58,18 @@ RUN ARCH=$(dpkg --print-architecture) && \
   dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
 
+# Install Claude Code globally
+RUN npm install -g @anthropic-ai/claude-code
+
 # Switch to non-root user
-USER $USERNAME
+USER rust
 
 # Set up shell environment
 ENV SHELL=/bin/zsh
 ENV EDITOR=nano
 ENV VISUAL=nano
+# Add Rust tools to PATH (installed at /opt/rust-tools/bin)
+ENV PATH="/opt/rust-tools/bin:$PATH"
 
 # Install shell theme and plugins
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
@@ -66,7 +80,3 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
   -a "source /usr/share/doc/fzf/examples/completion.zsh" \
   -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.zsh_history" \
   -x
-
-# Ensure Rust toolchain is up to date
-RUN rustup update && \
-  rustup component add clippy rustfmt

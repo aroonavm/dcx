@@ -433,9 +433,9 @@ If a user attempts to mount a directory not owned by the current user:
 Example warning:
 ```
 ⚠️  Directory /var/shared is owned by root (UID 0)
-    Current user is epsilon (UID 1000)
+    Current user is foobar (UID 1000)
 
-    In the container, you'll run as epsilon (1000).
+    In the container, you'll run as foobar (1000).
     You'll have read/write access only if the directory permissions allow it.
 
 Proceed? [y/N]
