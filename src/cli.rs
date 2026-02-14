@@ -67,7 +67,23 @@ pub enum Commands {
     /// Validate prerequisites (bindfs, devcontainer, Docker, Colima)
     Doctor,
 
-    /// Generate shell completion script (bash, zsh, fish, powershell, elvish)
+    #[command(
+        about = "Generate shell completion script (bash, zsh, fish, powershell, elvish)",
+        long_about = "Generates a completion script for your shell to enable tab-completion of dcx commands.\n\n\
+                      EXAMPLES:\n\
+                      \n\
+                      # Generate bash completions and install system-wide\n\
+                      dcx completions bash | sudo tee /etc/bash_completion.d/dcx\n\
+                      \n\
+                      # Generate zsh completions and install system-wide\n\
+                      dcx completions zsh | sudo tee /usr/share/zsh/site-functions/_dcx\n\
+                      \n\
+                      # Generate fish completions and install in user directory\n\
+                      dcx completions fish | tee ~/.config/fish/completions/dcx.fish\n\
+                      \n\
+                      After installation, restart your shell or source the file to enable completions.\n\
+                      Then use Tab to auto-complete: `dcx <TAB>` suggests up, down, exec, etc."
+    )]
     Completions {
         /// Target shell
         #[arg(value_enum)]
