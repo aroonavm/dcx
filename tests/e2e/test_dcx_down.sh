@@ -15,7 +15,7 @@ WS=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS"' EXIT
 
 "$DCX" up --workspace-folder "$WS" 2>/dev/null
-MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
+MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | tail -1)
 
 code=0
 "$DCX" down --workspace-folder "$WS" 2>/dev/null || code=$?

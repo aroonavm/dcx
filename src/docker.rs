@@ -67,10 +67,10 @@ pub fn remove_container(container_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Remove a container image by inspecting the container to get the image ID, then removing it.
+/// Get the image ID from a container by inspecting it.
 ///
-/// Returns `Err(message)` if the inspect or remove command fails.
-pub fn remove_container_image(container_id: &str) -> Result<(), String> {
+/// Returns `Err(message)` if the inspect command fails.
+pub fn get_image_id(container_id: &str) -> Result<String, String> {
     let out = cmd::run_capture("docker", &["inspect", "--format={{.Image}}", container_id])?;
     if out.status != 0 {
         return Err(format!(
@@ -82,9 +82,16 @@ pub fn remove_container_image(container_id: &str) -> Result<(), String> {
     if image_id.is_empty() {
         return Err("Could not determine image ID from container".to_string());
     }
-    let rmi_out = cmd::run_capture("docker", &["rmi", &image_id])?;
-    if rmi_out.status != 0 {
-        return Err(format!("Failed to remove image: {}", rmi_out.stderr.trim()));
+    Ok(image_id)
+}
+
+/// Remove a container image by ID using `docker rmi`.
+///
+/// Returns `Err(message)` if the remove command fails.
+pub fn remove_image(image_id: &str) -> Result<(), String> {
+    let out = cmd::run_capture("docker", &["rmi", image_id])?;
+    if out.status != 0 {
+        return Err(format!("Failed to remove image: {}", out.stderr.trim()));
     }
     Ok(())
 }
