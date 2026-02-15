@@ -400,8 +400,8 @@ fn clean_nothing_to_clean_message_when_relay_empty() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stdout.contains("Nothing to clean.") || stderr.contains("Docker is not available"),
-        "Expected 'Nothing to clean.' or Docker error, got stdout={stdout} stderr={stderr}"
+        stdout.contains("Nothing to clean for") || stderr.contains("Docker is not available"),
+        "Expected 'Nothing to clean for' or Docker error, got stdout={stdout} stderr={stderr}"
     );
 }
 

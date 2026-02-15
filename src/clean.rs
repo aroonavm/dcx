@@ -288,7 +288,7 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
         }
 
         if cleaned_count == 0 && errors.is_empty() {
-            println!("Nothing to clean.");
+            println!("Nothing to clean for {}.", workspace.display());
         }
 
         if errors.is_empty() {
