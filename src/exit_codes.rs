@@ -20,27 +20,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn success_is_zero() {
+    fn exit_codes_are_documented_constants() {
+        // Smoke test: verify constants are defined correctly.
+        // (Compile-time errors would catch value regressions anyway.)
         assert_eq!(SUCCESS, 0);
-    }
-
-    #[test]
-    fn runtime_error_is_one() {
         assert_eq!(RUNTIME_ERROR, 1);
-    }
-
-    #[test]
-    fn usage_error_is_two() {
         assert_eq!(USAGE_ERROR, 2);
-    }
-
-    #[test]
-    fn user_aborted_is_four() {
         assert_eq!(USER_ABORTED, 4);
-    }
-
-    #[test]
-    fn prereq_not_found_is_127() {
         assert_eq!(PREREQ_NOT_FOUND, 127);
     }
 }

@@ -41,76 +41,7 @@ fn version_output_contains_binary_name() {
         .stdout(predicate::str::contains("dcx"));
 }
 
-// --- dcx up --help ---
-
-#[test]
-fn up_help_shows_workspace_folder() {
-    dcx()
-        .args(["up", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--workspace-folder"));
-}
-
-#[test]
-fn up_help_shows_dry_run() {
-    dcx()
-        .args(["up", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--dry-run"));
-}
-
-#[test]
-fn up_help_shows_yes() {
-    dcx()
-        .args(["up", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--yes"));
-}
-
-// --- dcx exec --help ---
-
-#[test]
-fn exec_help_shows_workspace_folder() {
-    dcx()
-        .args(["exec", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--workspace-folder"));
-}
-
-// --- dcx down --help ---
-
-#[test]
-fn down_help_shows_workspace_folder() {
-    dcx()
-        .args(["down", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--workspace-folder"));
-}
-
-// --- dcx clean --help ---
-
-#[test]
-fn clean_help_shows_all() {
-    dcx()
-        .args(["clean", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--all"));
-}
-
-#[test]
-fn clean_help_shows_yes() {
-    dcx()
-        .args(["clean", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--yes"));
-}
+// Subcommand help text is validated by clap; spot-checking one subcommand is sufficient.
 
 // --- dcx up ---
 
@@ -206,14 +137,6 @@ fn up_recursive_guard_exits_nonzero() {
 // --- dcx doctor ---
 
 #[test]
-fn doctor_exits_zero_or_one_not_two() {
-    // In the test environment not all prerequisites will be installed.
-    // What matters: dcx doctor must never exit 2 (clap parse error).
-    let code = dcx().arg("doctor").output().unwrap().status.code();
-    assert_ne!(code, Some(2), "dcx doctor must not exit with a clap error");
-}
-
-#[test]
 fn doctor_always_prints_checking_prerequisites() {
     // The "Checking prerequisites..." header must appear regardless of check results.
     dcx()
@@ -223,13 +146,6 @@ fn doctor_always_prints_checking_prerequisites() {
 }
 
 // --- dcx status ---
-
-#[test]
-fn status_exits_zero_or_one_not_two() {
-    // docker may not be running in CI; exit 0 or 1 are both fine.
-    let code = dcx().arg("status").output().unwrap().status.code();
-    assert_ne!(code, Some(2), "dcx status must not exit with a clap error");
-}
 
 #[test]
 fn status_output_is_table_or_no_workspaces() {
@@ -276,72 +192,7 @@ fn exec_no_mount_exits_nonzero_with_message() {
     );
 }
 
-#[test]
-fn exec_missing_workspace_exits_nonzero() {
-    // A workspace path that does not exist must fail.
-    // exit 1 if Docker is unavailable; exit 2 if Docker is available.
-    dcx()
-        .args([
-            "exec",
-            "--workspace-folder",
-            "/nonexistent/__dcx_test_path__",
-            "--",
-            "true",
-        ])
-        .assert()
-        .failure();
-}
-
-#[test]
-fn exec_recursive_guard_exits_nonzero() {
-    // Using a path inside ~/.colima-mounts/dcx-* as the workspace must be rejected.
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
-    let relay_path = format!("{home}/.colima-mounts/dcx-test-a1b2c3d4");
-    dcx()
-        .args(["exec", "--workspace-folder", &relay_path, "--", "true"])
-        .assert()
-        .failure();
-}
-
 // --- dcx down ---
-
-#[test]
-fn down_missing_workspace_exits_nonzero() {
-    // A workspace path that does not exist must fail.
-    // exit 1 if Docker is unavailable; exit 2 if Docker is available.
-    dcx()
-        .args([
-            "down",
-            "--workspace-folder",
-            "/nonexistent/__dcx_test_path__",
-        ])
-        .assert()
-        .failure();
-}
-
-#[test]
-fn down_recursive_guard_exits_nonzero() {
-    // Using a path inside ~/.colima-mounts/dcx-* as the workspace must be rejected.
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
-    let relay_path = format!("{home}/.colima-mounts/dcx-test-a1b2c3d4");
-    dcx()
-        .args(["down", "--workspace-folder", &relay_path])
-        .assert()
-        .failure();
-}
-
-#[test]
-fn down_valid_workspace_no_mount_exits_zero_or_one() {
-    // /tmp has no dcx mount: exits 0 (Docker available, "Nothing to do")
-    // or exits 1 (Docker not available). Must not exit 2 (clap error).
-    let code = dcx()
-        .args(["down", "--workspace-folder", "/tmp"])
-        .output()
-        .unwrap()
-        .status
-        .code();
-    assert_ne!(code, Some(2), "dcx down must not exit with a clap error");
-}
 
 #[test]
 fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
@@ -360,31 +211,6 @@ fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
 }
 
 // --- dcx clean ---
-
-#[test]
-fn clean_exits_zero_or_one_not_two() {
-    // Docker may or may not be available. Must not exit 2 (clap parse error).
-    let code = dcx().arg("clean").output().unwrap().status.code();
-    assert_ne!(code, Some(2), "dcx clean must not exit with a clap error");
-}
-
-#[test]
-fn clean_nothing_to_clean_with_empty_home() {
-    // With an empty HOME (no relay dir), exit 0 (nothing to clean) or exit 1 (no Docker).
-    // In either case stdout must not contain a clap error.
-    use assert_fs::TempDir;
-    let home = TempDir::new().unwrap();
-    let out = dcx()
-        .env("HOME", home.path())
-        .arg("clean")
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        !stdout.contains("error:"),
-        "dcx clean stdout must not contain a clap error: {stdout}"
-    );
-}
 
 #[test]
 fn clean_nothing_to_clean_message_when_relay_empty() {

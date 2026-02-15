@@ -69,22 +69,11 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_dot_to_hyphen() {
+    fn sanitize_non_alphanumeric_to_hyphen() {
+        // Non-alphanumeric characters (dot, underscore, space, unicode) all become hyphens.
         assert_eq!(sanitize_name("my.project"), "my-project");
-    }
-
-    #[test]
-    fn sanitize_underscore_to_hyphen() {
         assert_eq!(sanitize_name("my_project"), "my-project");
-    }
-
-    #[test]
-    fn sanitize_space_to_hyphen() {
         assert_eq!(sanitize_name("my project"), "my-project");
-    }
-
-    #[test]
-    fn sanitize_unicode_non_ascii_to_hyphen() {
         assert_eq!(sanitize_name("héllo"), "h-llo");
     }
 
