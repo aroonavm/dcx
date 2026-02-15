@@ -234,11 +234,15 @@ dcx clean --all --yes    # Clean all, skip confirmation
    - Remove container's image (`docker rmi`)
    - Unmount bindfs (`fusermount -u` on Linux, `umount` on macOS) if mounted
    - Remove mount directory if it exists
-7. Print result:
+7. Scan relay directory for orphaned mounted dcx-* mounts (mounted but no associated container). For each found:
+   - Unmount bindfs if mounted
+   - Remove mount directory
+8. Print result for current workspace:
    ```
    Cleaned /home/user/myproject:
      dcx-myproject-a1b2c3d4  was: running  → stopped, removed
    ```
+   And results for any orphaned mounts cleaned
 
 **With `--all`:**
 
@@ -252,14 +256,16 @@ dcx clean --all --yes    # Clean all, skip confirmation
 
    Continue? [y/N]
    ```
-5. For each entry, full cleanup:
+5. For each mount entry, full cleanup:
    - Stop running container if any (`docker stop`)
    - Remove container — running or stopped (`docker rm`)
    - Remove container's image (`docker rmi`)
    - Unmount bindfs if mounted
    - Remove mount directory
-6. **Continue on failure:** If any individual mount fails, log the error and continue with remaining mounts
-7. Print summary:
+6. Clean up orphaned containers (stopped containers with `devcontainer.local_folder` label but no associated mount directory)
+7. Clean up orphaned images (dangling images and vsc-dcx-* images not used by any container)
+8. **Continue on failure:** If any individual operation fails, log the error and continue with remaining items
+9. Print summary:
    ```
    Cleaned 4 mounts:
      /home/user/project-a  →  dcx-project-a-a1b2c3d4    was: running     → stopped, removed
@@ -268,6 +274,7 @@ dcx clean --all --yes    # Clean all, skip confirmation
      dcx-old-thing-m3n4o5p6                               was: empty dir   → removed
    ```
    For stale/orphaned mounts, host path may not be recoverable — show mount directory name only.
+10. Report count of removed orphaned containers and images if any
 
 **Common to both modes:**
 - If any failures occurred, print them at the end and exit with non-zero code

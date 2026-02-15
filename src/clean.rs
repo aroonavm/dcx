@@ -82,11 +82,39 @@ fn remove_mount_dir(mount_point: &Path) -> Result<(), String> {
         .map_err(|e| format!("Failed to remove {}: {e}", mount_point.display()))
 }
 
+/// Categorize the state of a mount before cleaning.
+///
+/// Returns a human-readable state string: "running", "orphaned", "stale", or "empty dir"
+fn categorize_mount_state(mount_point: &Path, has_container: bool) -> String {
+    let table = platform::read_mount_table().unwrap_or_default();
+    let is_in_mount_table = mount_table::find_mount_source(&table, mount_point).is_some();
+    let is_accessible = mount_point.exists();
+
+    if is_in_mount_table && is_accessible {
+        if has_container {
+            "running".to_string()
+        } else {
+            "orphaned".to_string()
+        }
+    } else if is_in_mount_table && !is_accessible {
+        "stale".to_string()
+    } else if !is_in_mount_table && is_accessible {
+        "empty dir".to_string()
+    } else {
+        // Directory doesn't exist and not mounted — shouldn't happen, but classify as empty
+        "empty dir".to_string()
+    }
+}
+
 /// Perform full cleanup for a single mount entry: stop container, remove container, remove image, unmount, remove dir.
 ///
 /// `container_id` is optional; if provided, it will be used directly. If None, we skip remove_container and remove_image.
-/// Returns the action label on success.
-fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<String, String> {
+/// Returns a tuple of (state_before_cleaning, action_taken).
+fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<(String, String), String> {
+    // Determine state before cleanup
+    let has_container = container_id.is_some();
+    let state_before = categorize_mount_state(mount_point, has_container);
+
     // Stop the container (idempotent if not found)
     docker::stop_container(mount_point)?;
 
@@ -109,7 +137,13 @@ fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<String, S
     // Remove directory (mandatory)
     remove_mount_dir(mount_point)?;
 
-    Ok("cleaned".to_string())
+    let action = if has_container {
+        "stopped, removed".to_string()
+    } else {
+        "removed".to_string()
+    };
+
+    Ok((state_before, action))
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -187,14 +221,15 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
             }
 
             match clean_one(&mount_point, container_any.as_deref()) {
-                Ok(action) => {
+                Ok((was_state, action)) => {
+                    println!("Cleaned {}:", workspace.display());
                     println!(
-                        "Cleaned {}  →  {}  ({})",
-                        workspace.display(),
+                        "  {}  was: {}  → {}",
                         mount_point
                             .file_name()
                             .map(|n| n.to_string_lossy())
                             .unwrap_or_default(),
+                        was_state,
                         action
                     );
                     cleaned_count += 1;
@@ -241,7 +276,8 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
 
                 // Mounted but no container for this mount - clean it up
                 match clean_one(&path, None) {
-                    Ok(_) => {
+                    Ok((was_state, action)) => {
+                        println!("  {}  was: {}  → {}", name, was_state, action);
                         cleaned_count += 1;
                     }
                     Err(e) => {
@@ -310,12 +346,12 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
             let container_id = docker::query_container_any(mount_point);
 
             match clean_one(mount_point, container_id.as_deref()) {
-                Ok(_) => {
+                Ok((was_state, action)) => {
                     cleaned.push(CleanEntry {
                         workspace: None,
                         mount: mount_name_str,
-                        was: "mount".to_string(),
-                        action: "cleaned".to_string(),
+                        was: was_state,
+                        action,
                     });
                 }
                 Err(e) => {
