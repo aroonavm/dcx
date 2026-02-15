@@ -13,7 +13,7 @@ cp dcx ~/.local/bin/dcx && chmod +x ~/.local/bin/dcx
 
 # Usage
 dcx up                                       # Start devcontainer with mount
-dcx exec --workspace-folder . /bin/zsh       # Run command in container
+dcx exec --workspace-folder . -- /bin/zsh    # Run command in container
 dcx down                                     # Stop container and cleanup
 ```
 
