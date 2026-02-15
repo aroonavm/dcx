@@ -149,62 +149,117 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
         let name = mount_name(&workspace);
         let mount_point = relay.join(&name);
 
-        // Check if mount point directory exists; if not, nothing to clean
-        if !mount_point.exists() {
-            println!("Nothing to clean.");
-            return exit_codes::SUCCESS;
-        }
+        let mut cleaned_count = 0;
+        let mut errors = Vec::new();
 
-        // Find container (running or stopped)
-        let container_any = docker::query_container_any(&mount_point);
+        // Clean current workspace's mount if it exists
+        if mount_point.exists() {
+            // Find container (running or stopped)
+            let container_any = docker::query_container_any(&mount_point);
 
-        // If container found and running, check with user
-        #[allow(clippy::collapsible_if)]
-        if let Some(ref container_id) = container_any {
-            if docker::query_container(&mount_point).is_some() && !yes {
-                // Container is running, prompt user
-                let mount_name_str = mount_point
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let entries = vec![(
-                    workspace.display().to_string(),
-                    mount_name_str,
-                    container_id.clone(),
-                )];
-                let prompt_text = confirm_prompt(&entries);
-                eprintln!("{prompt_text}");
-                eprint!("\nContinue? [y/N] ");
-                let _ = io::stderr().flush();
-                let stdin = io::stdin();
-                let mut input = String::new();
-                if stdin.lock().read_line(&mut input).is_err() {
-                    return exit_codes::RUNTIME_ERROR;
-                }
-                if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-                    return exit_codes::USER_ABORTED;
-                }
-            }
-        }
-
-        // Clean this mount
-        match clean_one(&mount_point, container_any.as_deref()) {
-            Ok(action) => {
-                println!(
-                    "Cleaned {}  →  {}  ({})",
-                    workspace.display(),
-                    mount_point
+            // If container found and running, check with user
+            #[allow(clippy::collapsible_if)]
+            if let Some(ref container_id) = container_any {
+                if docker::query_container(&mount_point).is_some() && !yes {
+                    // Container is running, prompt user
+                    let mount_name_str = mount_point
                         .file_name()
-                        .map(|n| n.to_string_lossy())
-                        .unwrap_or_default(),
-                    action
-                );
-                exit_codes::SUCCESS
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let entries = vec![(
+                        workspace.display().to_string(),
+                        mount_name_str,
+                        container_id.clone(),
+                    )];
+                    let prompt_text = confirm_prompt(&entries);
+                    eprintln!("{prompt_text}");
+                    eprint!("\nContinue? [y/N] ");
+                    let _ = io::stderr().flush();
+                    let stdin = io::stdin();
+                    let mut input = String::new();
+                    if stdin.lock().read_line(&mut input).is_err() {
+                        return exit_codes::RUNTIME_ERROR;
+                    }
+                    if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                        return exit_codes::USER_ABORTED;
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("Error: {e}");
-                exit_codes::RUNTIME_ERROR
+
+            match clean_one(&mount_point, container_any.as_deref()) {
+                Ok(action) => {
+                    println!(
+                        "Cleaned {}  →  {}  ({})",
+                        workspace.display(),
+                        mount_point
+                            .file_name()
+                            .map(|n| n.to_string_lossy())
+                            .unwrap_or_default(),
+                        action
+                    );
+                    cleaned_count += 1;
+                }
+                Err(e) => {
+                    errors.push(e.clone());
+                }
             }
+        }
+
+        // Also clean up any orphaned MOUNTS in the relay directory (mounted but no container)
+        // But only if they are actually mounted (not just empty directories)
+        let table = platform::read_mount_table().unwrap_or_default();
+        progress::step("Checking for orphaned mounts...");
+        if let Ok(entries) = std::fs::read_dir(&relay) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+
+                // Skip non-dcx mounts
+                if !name.starts_with("dcx-") {
+                    continue;
+                }
+
+                // Skip the current workspace's mount (already handled)
+                if path == mount_point {
+                    continue;
+                }
+
+                // Only clean if this mount is actually mounted (check mount table)
+                if mount_table::find_mount_source(&table, &path).is_none() {
+                    // Not mounted, skip it (leave empty directories alone)
+                    continue;
+                }
+
+                // Mounted but potentially orphaned - check for container
+                if docker::query_container_any(&path).is_some() {
+                    // Container exists, don't clean
+                    continue;
+                }
+
+                // Mounted but no container for this mount - clean it up
+                match clean_one(&path, None) {
+                    Ok(_) => {
+                        cleaned_count += 1;
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                    }
+                }
+            }
+        }
+
+        if cleaned_count == 0 && errors.is_empty() {
+            println!("Nothing to clean.");
+        }
+
+        if errors.is_empty() {
+            exit_codes::SUCCESS
+        } else {
+            eprintln!("Error: {}", errors[0]);
+            exit_codes::RUNTIME_ERROR
         }
     } else {
         // Mode 2: `--all` — clean all dcx-managed workspaces
