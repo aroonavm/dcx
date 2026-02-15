@@ -37,7 +37,7 @@ echo "--- default clean targets current workspace ---"
 WS=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS"' EXIT
 "$DCX" up --workspace-folder "$WS" 2>/dev/null
-MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | tail -1)
+MOUNT_DIR=$(find "${RELAY}" -maxdepth 1 -name 'dcx-*' -type d 2>/dev/null | tail -1)
 
 # Run clean from current directory (test dir, not WS) - should find nothing to clean
 out=$("$DCX" clean 2>/dev/null)
@@ -47,29 +47,16 @@ assert_contains "clean from wrong dir prints nothing to clean" "$out" "Nothing t
 # Mount should still exist (wasn't cleaned because we were in wrong directory)
 assert_dir_exists "mount unchanged when clean targets wrong workspace" "$MOUNT_DIR"
 
-# --- Orphaned mount cleanup ---
-echo "--- orphaned mount cleanup ---"
-# The orphaned mount from "default clean" test is still there
-MOUNT_DIR2=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | tail -1)
-
-# Find the corresponding workspace by checking workspace resolution
-# For simplicity, just clean all remaining mounts with --all
-code=0
-"$DCX" clean --all --yes 2>/dev/null || code=$?
-assert_exit "clean --all removes orphaned" 0 "$code"
-REMAINING=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)
-[ "$REMAINING" -eq 0 ] && pass "orphaned mounts cleaned" || fail "still have $REMAINING orphaned mounts"
-
-# --- --all --yes cleans everything ---
-echo "--- --all --yes ---"
+# --- Clean with running container ---
+echo "--- clean with running container (--all) ---"
 WS2=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS" "$WS2"' EXIT
 "$DCX" up --workspace-folder "$WS2" 2>/dev/null
 code=0
 "$DCX" clean --all --yes 2>/dev/null || code=$?
-assert_exit "clean --all --yes exits 0" 0 "$code"
-REMAINING=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)
-[ "$REMAINING" -eq 0 ] && pass "relay is empty after --all --yes" || fail "relay still has $REMAINING entries"
+assert_exit "clean --all with container exits 0" 0 "$code"
+REMAINING=$(find "${RELAY}" -maxdepth 1 -name 'dcx-*' -type d 2>/dev/null | wc -l)
+[ "$REMAINING" -eq 0 ] && pass "all mounts cleaned" || fail "still have $REMAINING entries after clean"
 rm -rf "$WS2"
 
 # NOTE: Skipping prompt and failure mode tests - they have environment issues
