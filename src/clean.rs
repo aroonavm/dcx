@@ -90,12 +90,12 @@ fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<String, S
     // Stop the container (idempotent if not found)
     docker::stop_container(mount_point)?;
 
-    // Remove container if we have its ID. Must remove image before container!
+    // Remove container if we have its ID. Must remove container BEFORE image!
     if let Some(id) = container_id {
-        // Remove the image first (while container still exists for inspection)
-        docker::remove_container_image(id)?;
-        // Then remove the container
+        // Remove the container first (must happen before removing the image)
         docker::remove_container(id)?;
+        // Then remove the image
+        docker::remove_container_image(id)?;
     }
 
     // Check if mounted before unmounting. Only unmount if directory is actually mounted.
