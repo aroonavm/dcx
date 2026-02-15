@@ -96,6 +96,130 @@ pub fn remove_image(image_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Find all dcx-managed stopped containers and remove them.
+///
+/// This finds containers with devcontainer labels matching the naming pattern
+/// (vsc-dcx-*) and removes them, even if their mount directories no longer exist.
+/// Returns the count of removed containers.
+pub fn clean_orphaned_containers() -> Result<usize, String> {
+    // Find all stopped dcx containers (using the naming pattern vsc-dcx-*)
+    let out = cmd::run_capture(
+        "docker",
+        &[
+            "ps",
+            "-a",
+            "--filter",
+            "status=exited",
+            "--format",
+            "{{.ID}}",
+        ],
+    )?;
+
+    let mut removed = 0;
+    for container_id in out.stdout.lines() {
+        let container_id = container_id.trim();
+        if container_id.is_empty() {
+            continue;
+        }
+
+        // Check if container has devcontainer.local_folder label (dcx-managed)
+        let inspect_out = match cmd::run_capture(
+            "docker",
+            &[
+                "inspect",
+                "--format={{index .Config.Labels \"devcontainer.local_folder\"}}",
+                container_id,
+            ],
+        ) {
+            Ok(out) => out,
+            Err(_) => continue,
+        };
+
+        let local_folder = inspect_out.stdout.trim();
+
+        // Only remove if it has the devcontainer.local_folder label (starts with / and not empty/no value)
+        if !local_folder.is_empty()
+            && !local_folder.contains("no value")
+            && local_folder.starts_with("/")
+        {
+            // This is a dcx-managed container, try to remove it
+            if remove_container(container_id).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+
+    Ok(removed)
+}
+
+/// Remove all dcx container images that are not in use.
+///
+/// This removes both dangling images and named vsc-dcx-* images that have no running/stopped containers.
+/// Returns the count of removed images.
+pub fn clean_orphaned_images() -> Result<usize, String> {
+    // First remove dangling images (not used by any container)
+    let out = cmd::run_capture(
+        "docker",
+        &["images", "--filter", "dangling=true", "--format", "{{.ID}}"],
+    )?;
+
+    let mut removed = 0;
+    for image_id in out.stdout.lines() {
+        let image_id = image_id.trim();
+        if image_id.is_empty() {
+            continue;
+        }
+
+        // Try to remove the image
+        if remove_image(image_id).is_ok() {
+            removed += 1;
+        }
+    }
+
+    // Also remove vsc-dcx-* images that have no containers
+    let out = cmd::run_capture(
+        "docker",
+        &["images", "--format", "{{.Repository}}:{{.Tag}}"],
+    )?;
+
+    for image_name in out.stdout.lines() {
+        let image_name = image_name.trim();
+        if image_name.is_empty() || !image_name.contains("vsc-dcx-") {
+            continue;
+        }
+
+        // Check if this image is used by any container (running or stopped)
+        let check_out = match cmd::run_capture(
+            "docker",
+            &[
+                "ps",
+                "-a",
+                "--filter",
+                &format!("ancestor={image_name}"),
+                "--format",
+                "{{.ID}}",
+            ],
+        ) {
+            Ok(out) => out,
+            Err(_) => continue,
+        };
+
+        if !check_out.stdout.trim().is_empty() {
+            // Container is using this image, skip it
+            continue;
+        }
+
+        // No container uses this image, try to remove it (use --force to remove even if it has tags)
+        if let Ok(out) = cmd::run_capture("docker", &["rmi", "--force", image_name])
+            && out.status == 0
+        {
+            removed += 1;
+        }
+    }
+
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

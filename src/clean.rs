@@ -209,13 +209,10 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
     } else {
         // Mode 2: `--all` — clean all dcx-managed workspaces
         let entry_paths = scan_relay(&relay);
+        let mut cleaned: Vec<CleanEntry> = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
 
-        if entry_paths.is_empty() {
-            println!("Nothing to clean.");
-            return exit_codes::SUCCESS;
-        }
-
-        // Collect running containers for confirmation
+        // Collect running containers for confirmation (if there are entries)
         let running_containers: Vec<(String, String, String)> = entry_paths
             .iter()
             .filter_map(|mount_point| {
@@ -248,9 +245,6 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
         }
 
         // Clean all entries, continuing on failure
-        let mut cleaned: Vec<CleanEntry> = Vec::new();
-        let mut failures: Vec<String> = Vec::new();
-
         for mount_point in &entry_paths {
             let mount_name_str = mount_point
                 .file_name()
@@ -281,9 +275,38 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
             }
         }
 
+        // Clean up orphaned containers and images (not associated with existing mounts)
+        progress::step("Cleaning up orphaned containers...");
+        match docker::clean_orphaned_containers() {
+            Ok(removed) if removed > 0 => {
+                progress::step(&format!("Removed {removed} orphaned container(s)."));
+            }
+            Ok(_) => {
+                // No orphaned containers found
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not clean orphaned containers: {e}");
+            }
+        }
+
+        progress::step("Cleaning up orphaned images...");
+        match docker::clean_orphaned_images() {
+            Ok(removed) if removed > 0 => {
+                progress::step(&format!("Removed {removed} dangling image(s)."));
+            }
+            Ok(_) => {
+                // No dangling images found
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not clean orphaned images: {e}");
+            }
+        }
+
         // Print summary
         if !cleaned.is_empty() {
             println!("{}", format::format_clean_summary(&cleaned, 0));
+        } else if entry_paths.is_empty() {
+            println!("Nothing to clean.");
         }
 
         // Print failures
