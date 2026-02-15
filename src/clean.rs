@@ -8,6 +8,7 @@ use crate::cmd;
 use crate::docker;
 use crate::exit_codes;
 use crate::format::{self, CleanEntry};
+use crate::mount_table;
 use crate::naming::{mount_name, relay_dir};
 use crate::platform;
 use crate::progress;
@@ -96,8 +97,13 @@ fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<String, S
         docker::remove_container_image(id)?;
     }
 
-    // Unmount and remove directory
-    do_unmount(mount_point)?;
+    // Check if mounted before unmounting. Only unmount if directory is actually mounted.
+    let table = platform::read_mount_table().unwrap_or_default();
+    if mount_table::find_mount_source(&table, mount_point).is_some() {
+        do_unmount(mount_point)?;
+    }
+
+    // Remove directory (mandatory)
     remove_mount_dir(mount_point)?;
 
     Ok("cleaned".to_string())
