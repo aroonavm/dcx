@@ -232,8 +232,8 @@ Rewrote `clean_one` to always do full cleanup.
 - ✅ Phase 10: Container lifecycle fixes, orphaned cleanup, spec compliance
 
 **Quality Metrics:**
-- 147 unit tests pass
-- 41 integration tests pass
+- 140 unit tests pass (consolidated redundant tests)
+- 25 integration tests pass (removed 16 redundant meta-tests)
 - 100% spec compliance verified
 - All exit codes documented and tested
 - Cross-platform support (Linux + macOS) confirmed
