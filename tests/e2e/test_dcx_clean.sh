@@ -17,7 +17,7 @@ e2e_cleanup  # ensure we start clean
 out=$("$DCX" clean 2>/dev/null)
 code=$?
 assert_exit "clean exits 0 when nothing to clean" 0 "$code"
-assert_contains "clean prints Nothing to clean" "$out" "Nothing to clean."
+assert_contains "clean prints Nothing to clean" "$out" "Nothing to clean for"
 
 # --- Empty dir removed (default clean skips unrelated mounts) ---
 echo "--- empty directory removed ---"
@@ -25,7 +25,7 @@ mkdir -p "${RELAY}/dcx-empty-test-00000000"
 out=$("$DCX" clean 2>/dev/null)
 code=$?
 assert_exit "clean exits 0 with unrelated mount" 0 "$code"
-assert_contains "clean output says nothing to clean" "$out" "Nothing to clean."
+assert_contains "clean output says nothing to clean" "$out" "Nothing to clean for"
 # The unrelated empty mount should still exist (clean only targets current workspace)
 assert_dir_exists "unrelated mount left alone" "${RELAY}/dcx-empty-test-00000000"
 # Now clean it with --all
@@ -43,7 +43,7 @@ MOUNT_DIR=$(find "${RELAY}" -maxdepth 1 -name 'dcx-*' -type d 2>/dev/null | tail
 out=$("$DCX" clean 2>/dev/null)
 code=$?
 assert_exit "clean from wrong dir exits 0" 0 "$code"
-assert_contains "clean from wrong dir prints nothing to clean" "$out" "Nothing to clean."
+assert_contains "clean from wrong dir prints nothing to clean" "$out" "Nothing to clean for"
 # Mount should still exist (wasn't cleaned because we were in wrong directory)
 assert_dir_exists "mount unchanged when clean targets wrong workspace" "$MOUNT_DIR"
 
