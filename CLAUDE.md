@@ -29,6 +29,6 @@ A phase is complete when:
 ## Current status
 After each phase is over, check that the current state of the code exactly follows the spec. Then update this status and commit the code.
 
-Phase: 9
-Last completed: Phase 9 — Shell Completions + E2E Tests
+Phase: 10
+Last completed: Phase 10 — Fix container lifecycle (dcx down + dcx clean)
 Next: (see `specs/TASKS.md` for any remaining phases)

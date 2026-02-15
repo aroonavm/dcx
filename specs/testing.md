@@ -51,6 +51,7 @@ tests/
   │   ├── test_dcx_clean.sh
   │   ├── test_dcx_status.sh
   │   ├── test_dcx_doctor.sh
-  │   └── test_edge_cases.sh
+  │   ├── test_edge_cases.sh
+  │   └── test_stale_mounts.sh
   └── ... (Rust integration tests at tests/*.rs)
 ```

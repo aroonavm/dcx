@@ -10,7 +10,7 @@
 | `~/.colima-mounts does not exist` | `dcx` auto-creates this; check parent directory permissions |
 | `Mount base directory is not writable` | Check `colima.yaml` has the mount entry; restart Colima |
 | `Workspace path does not exist` | Check path exists: `ls -la /your/path` |
-| `No mount found. Run 'dcx up' first` | Run `dcx up` before `dcx exec` |
+| `No mount found for <path>. Run 'dcx up' first` | Run `dcx up` before `dcx exec` |
 | `Device busy` on unmount | Container still running; try `docker kill <id>` then `dcx down` |
 | Mount directory exists but empty | Run `dcx clean` to remove stale directory |
 
@@ -253,8 +253,13 @@ colima ssh -- mount | grep colima-mounts
 
 ### Check if a directory is mounted
 ```bash
+# Linux
 mountpoint ~/.colima-mounts/workspace-hash
 # Returns 0 if mounted, 1 if not
+
+# macOS (mountpoint not available)
+mount | grep workspace-hash
+# Shows mount info if mounted
 ```
 
 ### See container logs

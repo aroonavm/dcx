@@ -126,57 +126,12 @@ dcx up --help
 # Should show help for dcx up
 ```
 
-## Troubleshooting Setup
+## Troubleshooting
 
-### bindfs command not found
-```bash
-# Linux
-sudo apt install bindfs
+For detailed troubleshooting steps including common setup issues, see [`failure-recovery.md`](failure-recovery.md). Key diagnostic commands:
 
-# macOS
-brew install macfuse && brew install bindfs
-```
-
-### mount: operation not permitted
-- Check filesystem supports FUSE (most do)
-- Check user can mount FUSE (usually yes for regular users)
-- **macOS:** Ensure macFUSE kernel extension is allowed in System Settings > Privacy & Security (requires reboot)
-- Check `~/.colima-mounts` directory exists (dcx auto-creates it, but verify permissions)
-
-### colima ssh — ls ~/.colima-mounts fails
-
-**Problem:** Mount base directory is not accessible in VM
-
-**Solution:**
-1. Verify `colima.yaml` has the mount entry (see platform-specific paths above)
-2. Restart Colima: `colima stop && colima start`
-3. Check Colima is fully running: `docker info`
-
-### dcx command not found
-
-**Problem:** `dcx` binary not in PATH
-
-**Solution:**
-```bash
-# Verify binary exists
-ls -la ~/.local/bin/dcx
-
-# Verify PATH includes ~/.local/bin
-echo $PATH
-
-# If not in PATH, add to shell config
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### dcx up fails on first try
-
-Run the setup validation command:
-```bash
-dcx doctor  # Checks all prerequisites and reports what's missing/broken
-```
-
-Follow the fix instructions for any failing checks.
+- **`dcx doctor`** — Checks all prerequisites and reports what's missing/broken
+- **`dcx status`** — Shows all mounted workspaces and their health status
 
 ---
 

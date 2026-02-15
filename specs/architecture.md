@@ -172,8 +172,8 @@ dcx exec -- npm test              # Uses current directory
 1. Validate Docker/Colima is available; fail fast with "Docker is not available. Is Colima running?" (exit code 1)
 2. Resolve workspace path
 3. If workspace path starts with `~/.colima-mounts/dcx-`, fail with "Cannot use a dcx-managed mount point as a workspace. Use the original workspace path instead." (exit code 2)
-4. Verify mount exists (created by `dcx up`); fail with "No mount found for <path>. Run `dcx up` first."
-5. Verify mount is healthy (accessible). If unhealthy, fail with "Mount is stale. Run `dcx up` to remount."
+4. Verify mount exists (created by `dcx up`); fail with "No mount found for <path>. Run `dcx up` first." (exit code 1)
+5. Verify mount is healthy (accessible). If unhealthy, fail with "Mount is stale. Run `dcx up` to remount." (exit code 1)
 6. Rewrite `--workspace-folder` argument
 7. Delegate to real `devcontainer exec`
 
@@ -190,7 +190,7 @@ dcx down --workspace-folder /path/to/project
 **Behavior:**
 1. Validate Docker/Colima is available; fail fast with "Docker is not available. Is Colima running?" (exit code 1)
 2. Resolve workspace path
-3. If workspace directory doesn't exist, fail with "Workspace directory does not exist. Use `dcx clean` to remove stale mounts." (exit code non-zero)
+3. If workspace directory doesn't exist, fail with "Workspace directory does not exist. Use `dcx clean` to remove stale mounts." (exit code 2)
 4. If workspace path starts with `~/.colima-mounts/dcx-`, fail with "Cannot use a dcx-managed mount point as a workspace. Use the original workspace path instead." (exit code 2)
 5. Compute mount point from workspace path (same hash as `dcx up`)
 6. If no mount found: print "No mount found for <path>. Nothing to do." and exit (exit code 0)
@@ -393,9 +393,9 @@ dcx features list                   # Forwards to: devcontainer features list
 # ... any other devcontainer subcommand
 ```
 
-**`dcx --help` and `dcx --version`:** These show `dcx`'s own help and version, not devcontainer's. `dcx --help` lists the 6 managed subcommands and explains the tool's purpose. To see devcontainer's help, use `devcontainer --help` directly.
+**`dcx --help` and `dcx --version`:** These show `dcx`'s own help and version, not devcontainer's. `dcx --help` lists the 7 managed subcommands and explains the tool's purpose. To see devcontainer's help, use `devcontainer --help` directly.
 
-**Pass-through behavior:** `dcx` maintains a list of known subcommands (`up`, `exec`, `down`, `clean`, `status`, `doctor`). Any subcommand not in this list is forwarded directly to `devcontainer` with all arguments unchanged. This makes `dcx` a transparent drop-in replacement for `devcontainer` — users can use `dcx` for everything.
+**Pass-through behavior:** `dcx` maintains a list of known subcommands (`up`, `exec`, `down`, `clean`, `status`, `doctor`, `completions`). Any subcommand not in this list is forwarded directly to `devcontainer` with all arguments unchanged. This makes `dcx` a transparent drop-in replacement for `devcontainer` — users can use `dcx` for everything.
 
 ## Edge Cases
 

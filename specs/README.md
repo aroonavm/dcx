@@ -24,7 +24,7 @@
 - **Single responsibility:** Wrap `devcontainer up/exec/down` to manage workspace mounting
 - **Simple design:** Rust binary, direct subprocess calls, fail-fast error handling
 - **Multi-workspace:** Multiple workspaces can be mounted simultaneously; each gets its own `dcx-` prefixed mount
-- **7 commands:** `dcx up`, `dcx exec`, `dcx down`, `dcx clean`, `dcx status`, `dcx doctor`, `dcx completions` — everything else passes through to `devcontainer`
+- **7 commands:** 6 core subcommands (`dcx up`, `dcx exec`, `dcx down`, `dcx clean`, `dcx status`, `dcx doctor`) plus `dcx completions` for shell completion — everything else passes through to `devcontainer`
 - **CLI-first:** Wraps the `devcontainer` CLI; VS Code "Reopen in Container" is not supported (use `dcx up` + "Attach to Running Container" instead)
 - **Idempotent:** Safe to call `dcx up` multiple times; verifies mount health and reuses if valid
 - **Self-managing:** `dcx` auto-creates the relay directory and tracks mounts via naming convention — no state files
