@@ -29,6 +29,11 @@ A phase is complete when:
 ## Current status
 After each phase is over, check that the current state of the code exactly follows the spec. Then update this status and commit the code.
 
-Phase: 12
-Last completed: Phase 11 — Fix dcx clean image lifecycle and add --include-base-image
-Next: Phase 12 — Improve dcx clean UX (--purge, --dry-run, volume cleanup) — see specs/dcx-clean-ux.md
+Phase: 12 ✅ Complete
+Last completed: Phase 12 — Improve dcx clean UX (--purge, --dry-run, volume cleanup)
+Improvements:
+- Replaced --include-base-image with --purge (cleaner UX)
+- Added --dry-run to preview cleanup without executing
+- Added volume helper functions to docker.rs
+- New CleanPlan struct separates scan from execute phases
+- All tests pass (183 unit + 30 integration)
