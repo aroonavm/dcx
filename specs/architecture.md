@@ -206,12 +206,14 @@ dcx down --workspace-folder /path/to/project
 
 **Usage:**
 ```bash
-dcx clean                              # Clean current directory's devcontainer
-dcx clean --yes                        # Clean current directory, skip confirmation
-dcx clean --include-base-image        # Also remove the build image (e.g. dcx-dev:latest)
-dcx clean --all                        # Clean ALL dcx-managed devcontainers
-dcx clean --all --yes                  # Clean all, skip confirmation
-dcx clean --all --include-base-image  # Clean all + remove each workspace's build image
+dcx clean                        # Clean current directory's devcontainer
+dcx clean --yes                  # Clean current directory, skip confirmation
+dcx clean --purge                # Leave nothing behind: also remove build image and Docker volumes
+dcx clean --dry-run              # Preview what would be cleaned without doing it
+dcx clean --all                  # Clean ALL dcx-managed devcontainers
+dcx clean --all --yes            # Clean all, skip confirmation
+dcx clean --all --purge          # Clean all + remove build images + Docker volumes
+dcx clean --all --dry-run        # Preview cleanup of all workspaces
 ```
 
 **Two-image lifecycle:**
@@ -221,40 +223,42 @@ Every `dcx up` produces two images:
 1. **Build image** (e.g. `dcx-dev:latest`) — built from the workspace Dockerfile, tagged per the `image` field in `devcontainer.json`. Expensive to rebuild; preserved by default as a Docker layer cache for the next `dcx up`.
 2. **Runtime image** (e.g. `vsc-dcx-<mount-hash>-...-uid:latest`) — created automatically by devcontainer CLI as a UID-adjusted layer on top of the build image. Cheap to rebuild (one thin layer). This is what the container actually runs from.
 
-`dcx clean` always removes the runtime image. The build image is only removed when `--include-base-image` is given.
+`dcx clean` always removes the runtime image. The build image is only removed when `--purge` is given. `--purge` also removes Docker volumes associated with the container (e.g., `dcx-shellhistory-<devcontainerId>` volumes created by devcontainer).
 
 **Build image detection:**
 
-The build image name is read from the `image` field in the workspace's devcontainer configuration (`.devcontainer/devcontainer.json` or `.devcontainer.json` at workspace root). If the field is absent, the file is not found, or the mount source path cannot be resolved (e.g. stale mount), base image cleanup is skipped silently for that entry. The build image is only deleted if no containers (running or stopped) depend on it.
+The build image name is read from the `image` field in the workspace's devcontainer configuration (`.devcontainer/devcontainer.json` or `.devcontainer.json` at workspace root). If the field is absent, the file is not found, or the mount source path cannot be resolved (e.g. stale mount), build image cleanup is skipped silently for that entry. The build image is only deleted if no containers (running or stopped) depend on it.
 
 **Behavior:**
 
 1. Validate Docker/Colima is available; fail fast with "Docker is not available. Is Colima running?" (exit code 1)
+2. If `--dry-run`: scan all resources (mounts, containers, images, volumes if `--purge`), print cleanup plan, exit 0 without making changes.
 
 **Without `--all` (default — current workspace):**
 
-2. Resolve workspace path (current directory or `--workspace-folder`)
-3. Compute mount point from workspace path (same hash as `dcx up`)
-4. If no mount found and no stopped container found: print "Nothing to clean for <path>." and exit (exit code 0)
-5. If a running container is found: prompt for confirmation. `--yes` skips the prompt.
+3. Resolve workspace path (current directory or `--workspace-folder`)
+4. Compute mount point from workspace path (same hash as `dcx up`)
+5. If no mount found and no stopped container found: print "Nothing to clean for <path>." and exit (exit code 0)
+6. If a running container is found: prompt for confirmation. `--yes` skips the prompt.
    ```
    ⚠ Active container will be stopped:
      /home/user/myproject  →  dcx-myproject-a1b2c3d4  (container: abc123)
 
    Continue? [y/N]
    ```
-6. Full cleanup for this workspace:
+7. Full cleanup for this workspace:
    - Stop running container if any (`docker stop`)
+   - If `--purge` and container exists: capture volume names from container before removal
    - Remove container — running or stopped (`docker rm`)
    - Remove runtime image (`docker rmi --force`)
-   - If `--include-base-image`: read build image name from devcontainer.json; delete if no containers depend on it (`docker rmi`)
+   - If `--purge`: read build image name from devcontainer.json; delete if no containers depend on it (`docker rmi`); remove captured volumes
    - Unmount bindfs (`fusermount -u` on Linux, `umount` on macOS) if mounted
    - Remove mount directory if it exists
-7. Scan relay directory for orphaned mounted dcx-* mounts (mounted but no associated container). For each found:
+8. Scan relay directory for orphaned mounted dcx-* mounts (mounted but no associated container). For each found:
    - Unmount bindfs if mounted
    - Remove mount directory
-8. Clean up any remaining orphaned `vsc-dcx-*` images and dangling images (handles the case where the container was already removed externally before `dcx clean` ran)
-9. Print result for current workspace:
+9. Clean up any remaining orphaned `vsc-dcx-*` images and dangling images (handles the case where the container was already removed externally before `dcx clean` ran)
+10. Print result for current workspace:
    ```
    Cleaned /home/user/myproject:
      dcx-myproject-a1b2c3d4  was: running  → stopped, removed
@@ -263,9 +267,9 @@ The build image name is read from the `image` field in the workspace's devcontai
 
 **With `--all`:**
 
-2. Iterate all `dcx-*` entries in `~/.colima-mounts/`
-3. For each entry, find associated containers (running or stopped) via the `devcontainer.local_folder` label
-4. If any running containers found: prompt for confirmation listing all. `--yes` skips the prompt.
+3. Iterate all `dcx-*` entries in `~/.colima-mounts/`
+4. For each entry, find associated containers (running or stopped) via the `devcontainer.local_folder` label
+5. If any running containers found: prompt for confirmation listing all. `--yes` skips the prompt.
    ```
    ⚠ 2 active containers will be stopped:
      - /home/user/project-a  →  dcx-project-a-a1b2c3d4  (container: abc123)
@@ -273,18 +277,19 @@ The build image name is read from the `image` field in the workspace's devcontai
 
    Continue? [y/N]
    ```
-5. For each mount entry, full cleanup:
+6. For each mount entry, full cleanup:
    - Stop running container if any (`docker stop`)
+   - If `--purge` and container exists: capture volume names from container before removal
    - Remove container — running or stopped (`docker rm`)
    - Remove runtime image (`docker rmi --force`)
-   - If `--include-base-image`: resolve workspace source path from mount table (before unmounting); read build image name from devcontainer.json
+   - If `--purge`: resolve workspace source path from mount table (before unmounting); read build image name from devcontainer.json; remove captured volumes
    - Unmount bindfs if mounted
    - Remove mount directory
-6. If `--include-base-image`: after all per-entry cleanups, collect all detected build image names (deduplicated across workspaces), delete each that has no remaining containers. Entries where source path could not be resolved (stale mounts with no mount table entry) are skipped silently.
-7. Clean up orphaned containers (stopped containers with `devcontainer.local_folder` label but no associated mount directory)
-8. Clean up orphaned images (dangling images and `vsc-dcx-*` images not used by any container)
-9. **Continue on failure:** If any individual operation fails, log the error and continue with remaining items
-10. Print summary:
+7. If `--purge`: after all per-entry cleanups, collect all detected build image names (deduplicated across workspaces), delete each that has no remaining containers. Then sweep remaining `dcx-*` volumes not associated with any container. Entries where source path could not be resolved (stale mounts with no mount table entry) are skipped silently.
+8. Clean up orphaned containers (stopped containers with `devcontainer.local_folder` label but no associated mount directory)
+9. Clean up orphaned images (dangling images and `vsc-dcx-*` images not used by any container)
+10. **Continue on failure:** If any individual operation fails, log the error and continue with remaining items
+11. Print summary:
     ```
     Cleaned 4 mounts:
       /home/user/project-a  →  dcx-project-a-a1b2c3d4    was: running     → stopped, removed
@@ -293,7 +298,7 @@ The build image name is read from the `image` field in the workspace's devcontai
       dcx-old-thing-m3n4o5p6                               was: empty dir   → removed
     ```
     For stale/orphaned mounts, host path may not be recoverable — show mount directory name only.
-11. Report count of removed orphaned containers and images if any
+12. Report count of removed orphaned containers and images if any
 
 **Common to both modes:**
 - If any failures occurred, print them at the end and exit with non-zero code
@@ -303,7 +308,7 @@ The build image name is read from the `image` field in the workspace's devcontai
 
 **Signal handling:** If SIGINT arrives while cleanup is in progress, log "Signal received, finishing current cleanup..." and complete the current entry's cleanup before exiting. Remaining entries (in `--all` mode) are left for the user to re-run `dcx clean --all`.
 
-**Design rationale:** The build image (`dcx-dev:latest`) is preserved by default because it is an expensive build artifact that accelerates subsequent `dcx up` calls. Only `--include-base-image` removes it, signalling an intentional full reset. Two workspaces may share the same build image (e.g. two checkouts of the same repo); deduplication in `--all` mode ensures it is only deleted once. Base image deletion uses `docker rmi` without `--force` so Docker refuses if another image still depends on it — a safety guard against partially-shared image hierarchies.
+**Design rationale:** The build image (`dcx-dev:latest`) is preserved by default because it is an expensive build artifact that accelerates subsequent `dcx up` calls. Only `--purge` removes it, signalling an intentional full reset (also cleaning Docker volumes). Two workspaces may share the same build image (e.g. two checkouts of the same repo); deduplication in `--all` mode ensures it is only deleted once. Build image deletion uses `docker rmi` without `--force` so Docker refuses if another image still depends on it — a safety guard against partially-shared image hierarchies.
 
 ### `dcx status` — Show mounted workspaces
 
@@ -439,7 +444,7 @@ dcx features list                   # Forwards to: devcontainer features list
 4. Log detailed debug info (hash values, mount point name, source paths) to stderr for troubleshooting
 5. If mount is healthy and sources match, reuse it (normal idempotent case)
 
-**Container volume identity:** devcontainer CLI computes `devcontainerId` from workspace folder path. Since `dcx` rewrites the path, volumes from non-wrapper runs won't be reused (one-time issue when switching to wrapper).
+**Container ID computation:** devcontainer CLI computes `devcontainerId` from workspace folder path. Since `dcx` rewrites the path, volumes from non-wrapper runs won't be reused (one-time issue when switching to wrapper).
 
 **Workspace deleted while mounted:** If the source directory is deleted after mounting, the bindfs mount becomes invalid. On next interaction (`dcx exec`, `dcx up`, `dcx down`), `dcx` detects the missing workspace and errors: "Workspace directory does not exist. Use `dcx clean` to remove stale mounts."
 

@@ -29,6 +29,6 @@ A phase is complete when:
 ## Current status
 After each phase is over, check that the current state of the code exactly follows the spec. Then update this status and commit the code.
 
-Phase: 10
-Last completed: Phase 10 — Fix container lifecycle (dcx down + dcx clean)
-Next: (see `specs/TASKS.md` for any remaining phases)
+Phase: 12
+Last completed: Phase 11 — Fix dcx clean image lifecycle and add --include-base-image
+Next: Phase 12 — Improve dcx clean UX (--purge, --dry-run, volume cleanup) — see specs/dcx-clean-ux.md

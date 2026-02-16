@@ -4,7 +4,7 @@
 
 - **bindfs:** FUSE userspace bind-mount tool (no root required)
 - **Colima:** VM running with Docker
-- **devcontainer CLI:** Already installed
+- **devcontainer CLI:** npm package (@devcontainers/cli)
 - **Linux or macOS host**
 
 > **Note:** The binary is named `dcx` (not `dc`) to avoid conflict with the POSIX `dc` desk calculator utility.

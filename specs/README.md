@@ -8,6 +8,7 @@
 | **[Setup](setup.md)** | Installation and one-time configuration |
 | **[Troubleshooting](failure-recovery.md)** | Common errors and recovery steps |
 | **[Testing](testing.md)** | Testing strategy and approach |
+| **[Phase 12: dcx clean UX](dcx-clean-ux.md)** | Improve `dcx clean` with `--purge`, `--dry-run`, and volume cleanup |
 
 ---
 
@@ -32,7 +33,7 @@
 
 ## v1.0 Scope
 
-**In:** Linux and macOS, multiple simultaneous workspaces, warning before mounting non-owned directories, recovery from stale mounts, auto-creation of relay directory, `--dry-run` for `dcx up`, shell completions via `clap`
+**In:** Linux and macOS, multiple simultaneous workspaces, warning before mounting non-owned directories, recovery from stale mounts, auto-creation of relay directory, `--dry-run` for `dcx up` and `dcx clean`, shell completions via `clap`
 **Out:** Windows, read-only mounts, concurrent operations on same workspace, automatic Colima setup, VS Code "Reopen in Container" integration
 
-See [Architecture](architecture.md) for full scope definition.
+See [Architecture](architecture.md) for design details and [Known Limitations](architecture.md#known-limitations) for scope constraints.
