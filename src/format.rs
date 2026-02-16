@@ -85,6 +85,55 @@ pub struct CleanEntry {
     pub action: String,
 }
 
+/// A plan for cleaning a mount (used by dry-run preview).
+#[derive(Clone, Debug)]
+pub struct DryRunPlan {
+    /// Mount name (e.g. dcx-myproject-a1b2c3d4)
+    pub mount_name: String,
+    /// State before cleaning: "running", "orphaned", "stale", or "empty dir"
+    pub state: String,
+    /// Container ID if present
+    pub container_id: Option<String>,
+    /// Runtime image ID if present
+    pub runtime_image_id: Option<String>,
+    /// Build image name if purge=true
+    pub build_image_name: Option<String>,
+    /// Volumes if purge=true
+    pub volumes: Vec<String>,
+    /// Whether mounted
+    pub is_mounted: bool,
+}
+
+/// Format the `dcx clean --dry-run` preview.
+///
+/// Shows what would be cleaned without executing any changes.
+pub fn format_dry_run(plans: &[DryRunPlan]) -> String {
+    if plans.is_empty() {
+        return "Nothing to clean.".to_string();
+    }
+    let mut lines = vec!["Would clean:".to_string()];
+    for plan in plans {
+        lines.push(format!("  {}  ({})", plan.mount_name, plan.state));
+        if let Some(container_id) = &plan.container_id {
+            lines.push(format!("    - Stop and remove container {}", container_id));
+        }
+        if let Some(image_id) = &plan.runtime_image_id {
+            lines.push(format!("    - Remove runtime image {}", image_id));
+        }
+        if let Some(build_image) = &plan.build_image_name {
+            lines.push(format!("    - Remove build image {}  [purge]", build_image));
+        }
+        for volume in &plan.volumes {
+            lines.push(format!("    - Remove volume {}  [purge]", volume));
+        }
+        if plan.is_mounted {
+            lines.push("    - Unmount bindfs".to_string());
+        }
+        lines.push("    - Remove mount directory".to_string());
+    }
+    lines.join("\n")
+}
+
 /// Format the `dcx clean` summary.
 pub fn format_clean_summary(entries: &[CleanEntry], active_left: usize) -> String {
     let header = if active_left > 0 {
@@ -298,5 +347,113 @@ mod tests {
         // Verify the function doesn't panic and produces a well-formed header.
         let out = format_clean_summary(&[], 0);
         assert_eq!(out, "Cleaned 0 mounts:");
+    }
+
+    // --- format_dry_run ---
+
+    #[test]
+    fn dry_run_empty_plans_shows_nothing_to_clean() {
+        let out = format_dry_run(&[]);
+        assert_eq!(out, "Nothing to clean.");
+    }
+
+    #[test]
+    fn dry_run_single_running_container_shows_actions() {
+        let plans = vec![DryRunPlan {
+            mount_name: "dcx-myproject-a1b2c3d4".to_string(),
+            state: "running".to_string(),
+            container_id: Some("abc123def456".to_string()),
+            runtime_image_id: Some("sha256:xyz".to_string()),
+            build_image_name: None,
+            volumes: vec![],
+            is_mounted: true,
+        }];
+        let out = format_dry_run(&plans);
+        assert!(out.contains("Would clean:"), "got: {out}");
+        assert!(out.contains("dcx-myproject-a1b2c3d4"), "got: {out}");
+        assert!(out.contains("(running)"), "got: {out}");
+        assert!(
+            out.contains("Stop and remove container abc123def456"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("Remove runtime image sha256:xyz"),
+            "got: {out}"
+        );
+        assert!(out.contains("Unmount bindfs"), "got: {out}");
+        assert!(out.contains("Remove mount directory"), "got: {out}");
+    }
+
+    #[test]
+    fn dry_run_with_purge_shows_build_image_and_volumes() {
+        let plans = vec![DryRunPlan {
+            mount_name: "dcx-myproject-a1b2c3d4".to_string(),
+            state: "running".to_string(),
+            container_id: Some("abc123".to_string()),
+            runtime_image_id: Some("sha256:xyz".to_string()),
+            build_image_name: Some("dcx-dev:latest".to_string()),
+            volumes: vec!["dcx-shellhistory-abc123".to_string()],
+            is_mounted: true,
+        }];
+        let out = format_dry_run(&plans);
+        assert!(out.contains("[purge]"), "missing [purge] marker");
+        assert!(
+            out.contains("Remove build image dcx-dev:latest"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("Remove volume dcx-shellhistory-abc123"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn dry_run_orphaned_mount_shows_minimal_actions() {
+        let plans = vec![DryRunPlan {
+            mount_name: "dcx-old-e5f6g7h8".to_string(),
+            state: "orphaned".to_string(),
+            container_id: None,
+            runtime_image_id: None,
+            build_image_name: None,
+            volumes: vec![],
+            is_mounted: true,
+        }];
+        let out = format_dry_run(&plans);
+        assert!(out.contains("dcx-old-e5f6g7h8"), "got: {out}");
+        assert!(out.contains("(orphaned)"), "got: {out}");
+        assert!(
+            !out.contains("Stop and remove container"),
+            "should not stop container"
+        );
+        assert!(out.contains("Unmount bindfs"), "got: {out}");
+    }
+
+    #[test]
+    fn dry_run_multiple_plans() {
+        let plans = vec![
+            DryRunPlan {
+                mount_name: "dcx-project-a-a1b2c3d4".to_string(),
+                state: "running".to_string(),
+                container_id: Some("abc123".to_string()),
+                runtime_image_id: None,
+                build_image_name: None,
+                volumes: vec![],
+                is_mounted: true,
+            },
+            DryRunPlan {
+                mount_name: "dcx-project-b-e5f6g7h8".to_string(),
+                state: "orphaned".to_string(),
+                container_id: None,
+                runtime_image_id: None,
+                build_image_name: None,
+                volumes: vec![],
+                is_mounted: false,
+            },
+        ];
+        let out = format_dry_run(&plans);
+        assert!(out.contains("dcx-project-a-a1b2c3d4"), "got: {out}");
+        assert!(out.contains("dcx-project-b-e5f6g7h8"), "got: {out}");
+        assert!(out.contains("(running)"), "got: {out}");
+        assert!(out.contains("(orphaned)"), "got: {out}");
     }
 }

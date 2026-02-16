@@ -8,7 +8,7 @@
 | **[Setup](setup.md)** | Installation and one-time configuration |
 | **[Troubleshooting](failure-recovery.md)** | Common errors and recovery steps |
 | **[Testing](testing.md)** | Testing strategy and approach |
-| **[Phase 12: dcx clean UX](dcx-clean-ux.md)** | Improve `dcx clean` with `--purge`, `--dry-run`, and volume cleanup |
+| **[`dcx` clean](dcx-clean-ux.md)** | Improve `dcx clean` with `--purge`, `--dry-run`, and volume cleanup |
 
 ---
 

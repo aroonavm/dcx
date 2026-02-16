@@ -68,11 +68,13 @@ pub enum Commands {
         #[arg(long)]
         yes: bool,
 
-        /// Also remove the build image (e.g. dcx-dev:latest) read from devcontainer.json.
-        /// By default the build image is preserved as a Docker layer cache for the next dcx up.
-        /// With --all, removes build images for all cleaned workspaces.
+        /// Leave nothing behind: also remove the build image and Docker volumes
         #[arg(long)]
-        include_base_image: bool,
+        purge: bool,
+
+        /// Show what would be cleaned without doing it
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Show status of all dcx-managed workspaces

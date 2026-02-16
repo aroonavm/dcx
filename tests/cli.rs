@@ -212,6 +212,93 @@ fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
 // --- dcx clean ---
 
 #[test]
+fn clean_dry_run_flag_is_accepted() {
+    // --dry-run flag must be recognized (no clap error)
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .args(["clean", "--dry-run"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("error") || stderr.contains("Docker is not available"),
+        "Got unexpected error: {stderr}"
+    );
+}
+
+#[test]
+fn clean_purge_flag_is_accepted() {
+    // --purge flag must be recognized (no clap error)
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .args(["clean", "--purge"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("error") || stderr.contains("Docker is not available"),
+        "Got unexpected error: {stderr}"
+    );
+}
+
+#[test]
+fn clean_all_purge_dry_run_combined_is_accepted() {
+    // --all --purge --dry-run must all parse together
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .args(["clean", "--all", "--purge", "--dry-run"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("error") || stderr.contains("Docker is not available"),
+        "Got unexpected error: {stderr}"
+    );
+}
+
+#[test]
+fn clean_dry_run_empty_relay_exits_success() {
+    // --dry-run with empty relay should exit 0
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .args(["clean", "--dry-run"])
+        .output()
+        .unwrap();
+    // Exit success OR Docker not available error
+    assert!(
+        out.status.success()
+            || String::from_utf8_lossy(&out.stderr).contains("Docker is not available"),
+        "Exit code: {:?}",
+        out.status
+    );
+}
+
+#[test]
+fn clean_include_base_image_flag_is_rejected() {
+    // Old --include-base-image flag must not be accepted (no backward compat)
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .args(["clean", "--include-base-image"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && stderr.contains("error"),
+        "Flag should be rejected. stderr: {stderr}"
+    );
+}
+
+#[test]
 fn clean_nothing_to_clean_message_when_relay_empty() {
     // When Docker is available and the relay dir is empty, "Nothing to clean." must appear.
     // When Docker is unavailable, stderr gets the error message.

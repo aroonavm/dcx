@@ -52,14 +52,16 @@ fn main() {
             workspace_folder,
             all,
             yes,
-            include_base_image,
+            purge,
+            dry_run,
         } => {
             std::process::exit(clean::run_clean(
                 &home_dir(),
                 workspace_folder,
                 all,
                 yes,
-                include_base_image,
+                purge,
+                dry_run,
             ));
         }
         cli::Commands::Status => {

@@ -299,6 +299,76 @@ pub fn clean_orphaned_images() -> Result<usize, String> {
     Ok(removed)
 }
 
+/// List Docker volumes matching a name filter.
+///
+/// Returns a vector of volume names (one per line) that match the filter.
+pub fn list_volumes(name_filter: &str) -> Result<Vec<String>, String> {
+    let out = cmd::run_capture(
+        "docker",
+        &[
+            "volume",
+            "ls",
+            "--filter",
+            &format!("name={name_filter}"),
+            "--format",
+            "{{.Name}}",
+        ],
+    )?;
+    if out.status != 0 {
+        return Err(format!("Failed to list volumes: {}", out.stderr.trim()));
+    }
+    Ok(out
+        .stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect())
+}
+
+/// Remove a Docker volume by name.
+///
+/// Returns `Err(message)` if the volume removal fails.
+pub fn remove_volume(name: &str) -> Result<(), String> {
+    let out = cmd::run_capture("docker", &["volume", "rm", name])?;
+    if out.status != 0 {
+        return Err(format!(
+            "Failed to remove volume {}: {}",
+            name,
+            out.stderr.trim()
+        ));
+    }
+    Ok(())
+}
+
+/// Get volumes associated with a container (by container ID).
+///
+/// Returns a vector of volume names associated with the container, filtered to `dcx-*` prefix only.
+/// This must be called BEFORE the container is removed to capture volume names.
+pub fn get_container_volumes(container_id: &str) -> Result<Vec<String>, String> {
+    let out = cmd::run_capture(
+        "docker",
+        &[
+            "inspect",
+            "--format",
+            r#"{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}"#,
+            container_id,
+        ],
+    )?;
+    if out.status != 0 {
+        return Err(format!(
+            "Failed to inspect container volumes: {}",
+            out.stderr.trim()
+        ));
+    }
+    let volumes: Vec<String> = out
+        .stdout
+        .split_whitespace()
+        .filter(|v| !v.is_empty() && v.starts_with("dcx-"))
+        .map(|v| v.to_string())
+        .collect();
+    Ok(volumes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
