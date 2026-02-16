@@ -4,11 +4,12 @@
 
 | Document | Purpose |
 |----------|---------|
-| **[Architecture](architecture.md)** | Problem, solution, design, subcommands, usage examples |
-| **[Setup](setup.md)** | Installation and one-time configuration |
-| **[Troubleshooting](failure-recovery.md)** | Common errors and recovery steps |
-| **[Testing](testing.md)** | Testing strategy and approach |
-| **[`dcx` clean](dcx-clean-ux.md)** | Improve `dcx clean` with `--purge`, `--dry-run`, and volume cleanup |
+| **[ROADMAP.md](ROADMAP.md)** | Development phases, current status, roadmap |
+| **[architecture.md](architecture.md)** | Problem, solution, design, all command specifications |
+| **[guides/setup.md](guides/setup.md)** | Installation and one-time configuration |
+| **[guides/failure-recovery.md](guides/failure-recovery.md)** | Common errors and recovery steps |
+| **[guides/testing.md](guides/testing.md)** | Testing strategy and approach |
+| **[impl/](impl/)** | Implementation plans for each phase (Phase 12, etc.) |
 
 ---
 
@@ -36,4 +37,14 @@
 **In:** Linux and macOS, multiple simultaneous workspaces, warning before mounting non-owned directories, recovery from stale mounts, auto-creation of relay directory, `--dry-run` for `dcx up` and `dcx clean`, shell completions via `clap`
 **Out:** Windows, read-only mounts, concurrent operations on same workspace, automatic Colima setup, VS Code "Reopen in Container" integration
 
-See [Architecture](architecture.md) for design details and [Known Limitations](architecture.md#known-limitations) for scope constraints.
+See [architecture.md](architecture.md) for design details and [Constraints](architecture.md#constraints) for scope.
+
+---
+
+## How to Navigate
+
+1. **Want to understand how dcx works?** → Start with [architecture.md](architecture.md)
+2. **Setting up dcx?** → [guides/setup.md](guides/setup.md)
+3. **Having trouble?** → [guides/failure-recovery.md](guides/failure-recovery.md)
+4. **Contributing or implementing new features?** → [ROADMAP.md](ROADMAP.md) + [impl/](impl/) phase plans
+5. **Working on tests?** → [guides/testing.md](guides/testing.md)

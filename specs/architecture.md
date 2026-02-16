@@ -112,9 +112,9 @@ This makes the filesystem the single source of truth — no state to corrupt or 
 
 `dcx` automatically creates `~/.colima-mounts/` if it doesn't exist, using system default permissions (respects umask). No manual setup required. The home directory's own permissions naturally protect the relay in multi-user environments.
 
-## Subcommand Specifications
+## Command Specifications {#command-specs}
 
-### `dcx up` — Start devcontainer
+### Command: dcx up {#command-dcx-up}
 
 **Usage:**
 ```bash
@@ -160,7 +160,7 @@ dcx up --yes                              # Skip confirmation for non-owned dire
 - Must exist on host filesystem
 - If not owned by current user, warn and ask for confirmation (show read/write implications). Use `--yes` flag to skip the prompt.
 
-### `dcx exec` — Run command in devcontainer
+### Command: dcx exec {#command-dcx-exec}
 
 **Usage:**
 ```bash
@@ -179,7 +179,7 @@ dcx exec npm test                 # Uses current directory
 
 **Signal handling:** SIGINT is forwarded directly to the `devcontainer exec` child process. No special handling needed — `dcx` performs no mount operations during `exec`.
 
-### `dcx down` — Stop container and unmount
+### Command: dcx down {#command-dcx-down}
 
 **Usage:**
 ```bash
@@ -202,7 +202,7 @@ dcx down --workspace-folder /path/to/project
 
 **Idempotent for missing mounts:** Safe to call multiple times when mount was never created. If no mount found, prints informational message and exits cleanly (exit code 0). If workspace directory is deleted, fails with error — use `dcx clean` to recover.
 
-### `dcx clean` — Full cleanup of container, image, and mount
+### Command: dcx clean {#command-dcx-clean}
 
 **Usage:**
 ```bash
@@ -216,7 +216,7 @@ dcx clean --all --purge          # Clean all + remove build images + Docker volu
 dcx clean --all --dry-run        # Preview cleanup of all workspaces
 ```
 
-**Two-image lifecycle:**
+**Two-image lifecycle:** {#two-image-lifecycle}
 
 Every `dcx up` produces two images:
 
@@ -310,7 +310,7 @@ The build image name is read from the `image` field in the workspace's devcontai
 
 **Design rationale:** The build image (`dcx-dev:latest`) is preserved by default because it is an expensive build artifact that accelerates subsequent `dcx up` calls. Only `--purge` removes it, signalling an intentional full reset (also cleaning Docker volumes). Two workspaces may share the same build image (e.g. two checkouts of the same repo); deduplication in `--all` mode ensures it is only deleted once. Build image deletion uses `docker rmi` without `--force` so Docker refuses if another image still depends on it — a safety guard against partially-shared image hierarchies.
 
-### `dcx status` — Show mounted workspaces
+### Command: dcx status {#command-dcx-status}
 
 **Usage:**
 ```bash
@@ -335,7 +335,7 @@ dcx status
    For stale mounts where host path can't be resolved, show `(unknown)`.
 5. If no `dcx-*` entries found: print "No active workspaces."
 
-### `dcx doctor` — Validate setup
+### Command: dcx doctor {#command-dcx-doctor}
 
 **Usage:**
 ```bash
@@ -376,7 +376,9 @@ dcx doctor
 
 Exit code 0 if all checks pass, non-zero if any fail.
 
-## Progress Output
+## Standards & Requirements {#standards}
+
+### Progress Output
 
 All commands print step-by-step progress to stderr:
 
@@ -394,7 +396,7 @@ $ dcx down
 → Done.
 ```
 
-## Usage Examples
+### Usage & Examples {#usage-examples}
 
 The `dcx` wrapper augments certain `devcontainer` commands with mount management. All other commands are forwarded to `devcontainer` transparently:
 
@@ -422,7 +424,9 @@ dcx features list                   # Forwards to: devcontainer features list
 
 **Pass-through behavior:** `dcx` maintains a list of known subcommands (`up`, `exec`, `down`, `clean`, `status`, `doctor`, `completions`). Any subcommand not in this list is forwarded directly to `devcontainer` with all arguments unchanged. This makes `dcx` a transparent drop-in replacement for `devcontainer` — users can use `dcx` for everything.
 
-## Edge Cases
+## Known Constraints {#constraints}
+
+### Edge Cases
 
 **Workspace already under a Colima mount:** If workspace path starts with `~/.colima-mounts/dcx-`, fail with "Cannot use a dcx-managed mount point as a workspace. Use the original workspace path instead." (exit code 2). This prevents nesting devcontainers inside dcx mounts, which would break if the underlying mount gets cleaned up.
 
@@ -456,7 +460,7 @@ dcx features list                   # Forwards to: devcontainer features list
 
 **Colima restart while mounts are active:** If Colima restarts, the VM is recreated but host-side bindfs mounts survive. Colima re-mounts `~/.colima-mounts` from the host into the new VM (per `colima.yaml` config), so `dcx-*` mount content remains visible. Containers are lost (VM recreated) but `dcx up` recovers automatically — it detects the healthy mount, reuses it, and starts a new container.
 
-## Permissions: Non-User-Owned Directories
+### Permissions: Non-User-Owned Directories {#permissions}
 
 If a user attempts to mount a directory not owned by the current user:
 
