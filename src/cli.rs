@@ -39,7 +39,11 @@ pub enum Commands {
         workspace_folder: Option<PathBuf>,
 
         /// Command and arguments to run inside the container
-        #[arg(last = true, value_name = "CMD")]
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            value_name = "CMD"
+        )]
         command: Vec<String>,
     },
 

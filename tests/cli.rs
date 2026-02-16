@@ -179,7 +179,6 @@ fn exec_no_mount_exits_nonzero_with_message() {
             "exec",
             "--workspace-folder",
             workspace.path().to_str().unwrap(),
-            "--",
             "true",
         ])
         .output()

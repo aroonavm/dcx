@@ -164,8 +164,8 @@ dcx up --yes                              # Skip confirmation for non-owned dire
 
 **Usage:**
 ```bash
-dcx exec --workspace-folder . -- bash
-dcx exec -- npm test              # Uses current directory
+dcx exec --workspace-folder . bash
+dcx exec npm test                 # Uses current directory
 ```
 
 **Behavior:**
@@ -376,7 +376,7 @@ The `dcx` wrapper augments certain `devcontainer` commands with mount management
 ```bash
 # These commands use dcx wrapper (bindfs mount is created/managed)
 dcx up                              # Create mount, start container
-dcx exec -- npm test                # Run command in container
+dcx exec npm test                   # Run command in container
 dcx down                            # Stop container, cleanup mount
 dcx clean                           # Full cleanup for current workspace (stop, rm, rmi, unmount)
 dcx clean --all                     # Full cleanup for ALL dcx-managed workspaces
