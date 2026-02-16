@@ -287,6 +287,20 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
             }
         }
 
+        // Clean up any orphaned images (in case container was already removed)
+        progress::step("Cleaning up orphaned images...");
+        match docker::clean_orphaned_images() {
+            Ok(removed) if removed > 0 => {
+                progress::step(&format!("Removed {removed} dangling image(s)."));
+            }
+            Ok(_) => {
+                // No orphaned images found
+            }
+            Err(e) => {
+                errors.push(format!("Warning: Could not clean orphaned images: {e}"));
+            }
+        }
+
         if cleaned_count == 0 && errors.is_empty() {
             println!("Nothing to clean for {}.", workspace.display());
         } else if errors.is_empty() {
