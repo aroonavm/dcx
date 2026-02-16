@@ -245,6 +245,7 @@ dependencies = [
  "predicates",
  "sha2",
  "signal-hook",
+ "tempfile",
 ]
 
 [[package]]

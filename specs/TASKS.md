@@ -221,21 +221,60 @@ Rewrote `clean_one` to always do full cleanup.
 
 ---
 
-## Project Status ✅
+## Phase 11: Fix `dcx clean` image lifecycle + `--include-base-image`
 
-**Phase 0-10 Complete.** All v1.0 scope items from `specs/README.md` have been implemented and verified:
+See: `architecture.md` § "dcx clean" — two-image lifecycle, `--include-base-image` behavior, base image detection.
+
+### Task 1: Update specs ✅
+
+Done. See `architecture.md` § "dcx clean".
+
+### Task 2: Fix `remove_image()` in `docker.rs`
+
+Add `--force` to `docker rmi`. Consistent with `clean_orphaned_images()` which already uses `--force`.
+
+### Task 3: Add base image helpers to `docker.rs`
+
+| Function | Signature | Behavior |
+|----------|-----------|----------|
+| `get_base_image_name` | `(workspace: &Path) -> Option<String>` | Reads `image` field from `.devcontainer/devcontainer.json` or `.devcontainer.json`. Returns `None` if absent or unreadable. |
+| `remove_base_image` | `(image_name: &str) -> Result<(), String>` | `docker ps -a --filter ancestor=<image>` check; if clear, `docker rmi <name>` (no `--force`). |
+
+Unit tests: field present, field absent, file missing, whitespace variant (`"image" : "name"`).
+
+### Task 4: Fix default-mode orphan image cleanup in `clean.rs`
+
+Reinstate `clean_orphaned_images()` call at end of default mode (safety net for externally-removed containers). Non-fatal; push errors to `errors` vec.
+
+### Task 5: Add `--include-base-image` to CLI, `clean_one()`, `run_clean()`
+
+- `src/cli.rs`: add `include_base_image: bool` to `Clean` struct.
+- `src/main.rs`: pass through to `run_clean()`.
+- `src/clean.rs`: `clean_one(mount_point, container_id, include_base_image)` — before unmounting, read mount table to get workspace source, call `get_base_image_name()`, then `remove_base_image()` after runtime image deleted. Non-fatal on failure.
+- `--all` mode: collect base image names inside `clean_one()` per-entry; deduplication is natural (second deletion attempt for shared image gets "not found" → ignored).
+
+### Task 6: Update E2E tests (`tests/e2e/test_dcx_clean.sh`)
+
+- After `dcx clean --all --yes`: assert no `vsc-dcx-*` images remain.
+- After `dcx clean --all --yes --include-base-image`: assert build image also gone.
+- After default `dcx clean` with running container: assert `vsc-dcx-*` image removed.
+
+### Task 7: Run `make check` + E2E validation
+
+---
+
+## Project Status
+
+**Phase 0-10 Complete.**
 
 - ✅ Phase 0-3: Core architecture and CLI foundation
 - ✅ Phase 4-6: Primary commands (`dcx doctor`, `dcx status`, `dcx up`, `dcx exec`, `dcx down`)
 - ✅ Phase 7-8: Advanced cleanup (`dcx clean`), signal handling, progress output
 - ✅ Phase 9: E2E tests, shell completions, error message audit
 - ✅ Phase 10: Container lifecycle fixes, orphaned cleanup, spec compliance
+- 🔄 Phase 11: Fix `dcx clean` image lifecycle + `--include-base-image` (in progress)
 
-**Quality Metrics:**
-- 140 unit tests pass (consolidated redundant tests)
-- 25 integration tests pass (removed 16 redundant meta-tests)
-- 100% spec compliance verified
-- All exit codes documented and tested
+**Quality Metrics (Phase 10):**
+- 140 unit tests pass
+- 25 integration tests pass
 - Cross-platform support (Linux + macOS) confirmed
-
-**Next Steps:** Project ready for v1.0 release. Any further work falls under post-release maintenance or v1.1 features.

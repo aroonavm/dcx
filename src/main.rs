@@ -52,8 +52,15 @@ fn main() {
             workspace_folder,
             all,
             yes,
+            include_base_image,
         } => {
-            std::process::exit(clean::run_clean(&home_dir(), workspace_folder, all, yes));
+            std::process::exit(clean::run_clean(
+                &home_dir(),
+                workspace_folder,
+                all,
+                yes,
+                include_base_image,
+            ));
         }
         cli::Commands::Status => {
             std::process::exit(status::run_status(&home_dir()));

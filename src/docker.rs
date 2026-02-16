@@ -87,11 +87,90 @@ pub fn get_image_id(container_id: &str) -> Result<String, String> {
 
 /// Remove a container image by ID using `docker rmi`.
 ///
+/// Uses `--force` to handle tagged images (e.g. `vsc-dcx-*-uid`) which would
+/// otherwise fail removal without it.
 /// Returns `Err(message)` if the remove command fails.
 pub fn remove_image(image_id: &str) -> Result<(), String> {
-    let out = cmd::run_capture("docker", &["rmi", image_id])?;
+    let out = cmd::run_capture("docker", &["rmi", "--force", image_id])?;
     if out.status != 0 {
         return Err(format!("Failed to remove image: {}", out.stderr.trim()));
+    }
+    Ok(())
+}
+
+/// Read the build image name from a workspace's devcontainer configuration.
+///
+/// Checks `.devcontainer/devcontainer.json` then `.devcontainer.json` at the workspace root.
+/// Extracts the top-level `"image"` field value. Returns `None` if the file is not found,
+/// the field is absent, or parsing fails.
+pub fn get_base_image_name(workspace: &std::path::Path) -> Option<String> {
+    let candidates = [
+        workspace.join(".devcontainer").join("devcontainer.json"),
+        workspace.join(".devcontainer.json"),
+    ];
+    for path in &candidates {
+        if let Ok(content) = std::fs::read_to_string(path)
+            && let Some(name) = extract_image_field(&content)
+        {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/// Extract the top-level `"image"` field value from devcontainer JSON content.
+///
+/// Searches for the first `"image"` key followed by a string value. This is a
+/// simple scan sufficient for the well-structured devcontainer.json format.
+fn extract_image_field(content: &str) -> Option<String> {
+    let key = "\"image\"";
+    let pos = content.find(key)?;
+    let after_key =
+        content[pos + key.len()..].trim_start_matches(|c: char| c.is_whitespace() || c == ':');
+    let after_key = after_key.trim_start();
+    if !after_key.starts_with('"') {
+        return None;
+    }
+    let inner = &after_key[1..];
+    let end = inner.find('"')?;
+    let value = inner[..end].trim().to_string();
+    if value.is_empty() { None } else { Some(value) }
+}
+
+/// Remove a build image by name if no containers depend on it.
+///
+/// Checks `docker ps -a --filter ancestor=<image>` first. If containers are found,
+/// returns an error without attempting deletion. Otherwise runs `docker rmi <name>`
+/// without `--force` so Docker can refuse if another image was built FROM this one.
+pub fn remove_base_image(image_name: &str) -> Result<(), String> {
+    let check = cmd::run_capture(
+        "docker",
+        &[
+            "ps",
+            "-a",
+            "--filter",
+            &format!("ancestor={image_name}"),
+            "--format",
+            "{{.ID}}",
+        ],
+    )?;
+    let ids: Vec<&str> = check
+        .stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    if !ids.is_empty() {
+        return Err(format!(
+            "Base image {image_name} is still in use by {} container(s).",
+            ids.len()
+        ));
+    }
+    let out = cmd::run_capture("docker", &["rmi", image_name])?;
+    if out.status != 0 {
+        return Err(format!(
+            "Failed to remove base image: {}",
+            out.stderr.trim()
+        ));
     }
     Ok(())
 }
@@ -241,5 +320,88 @@ mod tests {
     #[test]
     fn query_container_any_handles_empty_output() {
         // This test verifies the function handles empty output without panicking.
+    }
+
+    // --- extract_image_field ---
+
+    #[test]
+    fn extract_image_field_returns_image_name() {
+        let json = r#"{ "name": "My Dev", "image": "dcx-dev:latest", "build": {} }"#;
+        assert_eq!(
+            extract_image_field(json),
+            Some("dcx-dev:latest".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_image_field_returns_none_when_absent() {
+        let json = r#"{ "name": "My Dev", "build": { "dockerfile": "Dockerfile" } }"#;
+        assert_eq!(extract_image_field(json), None);
+    }
+
+    #[test]
+    fn extract_image_field_handles_whitespace_around_colon() {
+        let json = r#"{ "image"  :  "my-image:1.0" }"#;
+        assert_eq!(extract_image_field(json), Some("my-image:1.0".to_string()));
+    }
+
+    #[test]
+    fn extract_image_field_returns_none_for_empty_value() {
+        let json = r#"{ "image": "" }"#;
+        assert_eq!(extract_image_field(json), None);
+    }
+
+    // --- get_base_image_name ---
+
+    #[test]
+    fn get_base_image_name_reads_devcontainer_json() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let dc_dir = dir.path().join(".devcontainer");
+        fs::create_dir(&dc_dir).unwrap();
+        fs::write(
+            dc_dir.join("devcontainer.json"),
+            r#"{"image":"test-image:latest"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            get_base_image_name(dir.path()),
+            Some("test-image:latest".to_string())
+        );
+    }
+
+    #[test]
+    fn get_base_image_name_falls_back_to_root_devcontainer_json() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(".devcontainer.json"),
+            r#"{"image":"root-image:v2"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            get_base_image_name(dir.path()),
+            Some("root-image:v2".to_string())
+        );
+    }
+
+    #[test]
+    fn get_base_image_name_returns_none_when_no_config() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(get_base_image_name(dir.path()), None);
+    }
+
+    #[test]
+    fn get_base_image_name_returns_none_when_no_image_field() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let dc_dir = dir.path().join(".devcontainer");
+        fs::create_dir(&dc_dir).unwrap();
+        fs::write(
+            dc_dir.join("devcontainer.json"),
+            r#"{"name":"My Dev","build":{}}"#,
+        )
+        .unwrap();
+        assert_eq!(get_base_image_name(dir.path()), None);
     }
 }

@@ -106,11 +106,18 @@ fn categorize_mount_state(mount_point: &Path, has_container: bool) -> String {
     }
 }
 
-/// Perform full cleanup for a single mount entry: stop container, remove container, remove image, unmount, remove dir.
+/// Perform full cleanup for a single mount entry: stop container, remove container, remove
+/// runtime image, optionally remove build image, unmount, remove dir.
 ///
-/// `container_id` is optional; if provided, it will be used directly. If None, we skip remove_container and remove_image.
+/// `container_id` is optional; if None, container/image removal is skipped.
+/// `include_base_image`: if true, reads the workspace's devcontainer.json to find the build
+/// image name and deletes it if no containers depend on it. Non-fatal on failure.
 /// Returns a tuple of (state_before_cleaning, action_taken).
-fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<(String, String), String> {
+fn clean_one(
+    mount_point: &Path,
+    container_id: Option<&str>,
+    include_base_image: bool,
+) -> Result<(String, String), String> {
     // Determine state before cleanup
     let has_container = container_id.is_some();
     let state_before = categorize_mount_state(mount_point, has_container);
@@ -124,13 +131,27 @@ fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<(String, 
         let image_id = docker::get_image_id(id)?;
         // Then remove the container
         docker::remove_container(id)?;
-        // Finally remove the image
+        // Finally remove the runtime image (vsc-dcx-*-uid)
         docker::remove_image(&image_id)?;
     }
 
-    // Check if mounted before unmounting. Only unmount if directory is actually mounted.
+    // Resolve workspace source path from mount table before unmounting.
+    // Needed for base image detection and must happen while mount is still active.
     let table = platform::read_mount_table().unwrap_or_default();
-    if mount_table::find_mount_source(&table, mount_point).is_some() {
+    let workspace_source = mount_table::find_mount_source(&table, mount_point);
+
+    // Optionally remove the build image (e.g. dcx-dev:latest).
+    // Non-fatal: the image may be shared with other workspaces or already removed.
+    if include_base_image
+        && let Some(src) = workspace_source
+        && let Some(base_image) = docker::get_base_image_name(std::path::Path::new(src))
+        && let Err(e) = docker::remove_base_image(&base_image)
+    {
+        eprintln!("Note: Could not remove base image {base_image}: {e}");
+    }
+
+    // Unmount if mounted.
+    if workspace_source.is_some() {
         do_unmount(mount_point)?;
     }
 
@@ -154,7 +175,13 @@ fn clean_one(mount_point: &Path, container_id: Option<&str>) -> Result<(String, 
 /// With `--all`: cleans all dcx-managed workspaces.
 ///
 /// Returns the exit code that `main` should pass to `std::process::exit`.
-pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes: bool) -> i32 {
+pub fn run_clean(
+    home: &Path,
+    workspace_folder: Option<PathBuf>,
+    all: bool,
+    yes: bool,
+    include_base_image: bool,
+) -> i32 {
     // Install SIGINT handler. If Ctrl+C arrives while an unmount is in progress,
     // we finish that entry's cleanup then exit (remaining entries are skipped).
     let interrupted = signals::interrupted_flag();
@@ -220,7 +247,7 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
                 }
             }
 
-            match clean_one(&mount_point, container_any.as_deref()) {
+            match clean_one(&mount_point, container_any.as_deref(), include_base_image) {
                 Ok((was_state, action)) => {
                     println!("Cleaned {}:", workspace.display());
                     println!(
@@ -275,7 +302,7 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
                 }
 
                 // Mounted but no container for this mount - clean it up
-                match clean_one(&path, None) {
+                match clean_one(&path, None, false) {
                     Ok((was_state, action)) => {
                         println!("  {}  was: {}  → {}", name, was_state, action);
                         cleaned_count += 1;
@@ -284,6 +311,19 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
                         errors.push(e);
                     }
                 }
+            }
+        }
+
+        // Fallback: clean any vsc-dcx-* or dangling images that weren't caught above.
+        // Handles the case where the container was already removed externally before dcx clean ran.
+        progress::step("Checking for orphaned images...");
+        match docker::clean_orphaned_images() {
+            Ok(removed) if removed > 0 => {
+                progress::step(&format!("Removed {removed} orphaned image(s)."));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                errors.push(format!("Warning: Could not clean orphaned images: {e}"));
             }
         }
 
@@ -347,7 +387,7 @@ pub fn run_clean(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes:
 
             let container_id = docker::query_container_any(mount_point);
 
-            match clean_one(mount_point, container_id.as_deref()) {
+            match clean_one(mount_point, container_id.as_deref(), include_base_image) {
                 Ok((was_state, action)) => {
                     cleaned.push(CleanEntry {
                         workspace: None,

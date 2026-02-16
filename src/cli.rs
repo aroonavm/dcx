@@ -67,6 +67,12 @@ pub enum Commands {
         /// Skip confirmation prompts
         #[arg(long)]
         yes: bool,
+
+        /// Also remove the build image (e.g. dcx-dev:latest) read from devcontainer.json.
+        /// By default the build image is preserved as a Docker layer cache for the next dcx up.
+        /// With --all, removes build images for all cleaned workspaces.
+        #[arg(long)]
+        include_base_image: bool,
     },
 
     /// Show status of all dcx-managed workspaces
