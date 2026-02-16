@@ -58,9 +58,6 @@ RUN ARCH=$(dpkg --print-architecture) && \
   dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
 
-# Install Claude Code globally
-RUN npm install -g @anthropic-ai/claude-code
-
 # Switch to non-root user
 USER rust
 
@@ -68,8 +65,11 @@ USER rust
 ENV SHELL=/bin/zsh
 ENV EDITOR=nano
 ENV VISUAL=nano
-# Add Rust tools to PATH (installed at /opt/rust-tools/bin)
-ENV PATH="/opt/rust-tools/bin:$PATH"
+# Add Rust tools and Claude Code to PATH
+ENV PATH="/home/rust/.local/bin:/opt/rust-tools/bin:$PATH"
+
+# Install Claude Code via native installer
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Install shell theme and plugins
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
