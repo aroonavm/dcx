@@ -1,50 +1,42 @@
-# Specifications — `dcx` Workspace Mounting for Colima
-
-## Quick Links
-
-| Document | Purpose |
-|----------|---------|
-| **[ROADMAP.md](ROADMAP.md)** | Development phases, current status, roadmap |
-| **[architecture.md](architecture.md)** | Problem, solution, design, all command specifications |
-| **[guides/setup.md](guides/setup.md)** | Installation and one-time configuration |
-| **[guides/failure-recovery.md](guides/failure-recovery.md)** | Common errors and recovery steps |
-| **[guides/testing.md](guides/testing.md)** | Testing strategy and approach |
-| **[impl/](impl/)** | Implementation plans for each phase (Phase 12, etc.) |
-
----
+# Specifications — `dcx` {#readme}
 
 ## What is `dcx`?
 
-`dcx` is a wrapper for `devcontainer` that solves this problem:
+Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima.yaml`), but `devcontainer up` needs dynamic paths. Broadly mounting `$HOME` is a security risk (agent in project-A can access project-B). **Solution:** Use `bindfs` to project only the workspace into a pre-mounted relay directory (`~/.colima-mounts`).
 
-**Problem:** Colima mounts are static (configured in `colima.yaml` at startup). But `devcontainer up` needs to mount dynamic workspace paths that don't exist in the VM yet. Broadly mounting `$HOME` exposes all projects to every container — a security risk, especially when running AI agents autonomously.
+## Quick Navigation {#navigation}
 
-**Solution:** Use `bindfs` to project only the workspace directory into a pre-mounted relay directory (`~/.colima-mounts`). This exposes minimal surface area while keeping the mount dynamic. Each workspace is isolated — an agent in project-A cannot access project-B.
+| I want to... | Read this |
+|--------------|-----------|
+| **Understand how dcx works** | [architecture.md](architecture.md) — Problem, solution, all command specs |
+| **See development roadmap** | [ROADMAP.md](ROADMAP.md) — Phases 0–12 status + future plans |
+| **Implement a feature** | [ROADMAP.md](ROADMAP.md) + [impl/phase-N.md](impl/) — What + how |
+| **Install dcx** | [guides/setup.md](guides/setup.md) — Prerequisites, setup steps |
+| **Fix a problem** | [guides/failure-recovery.md](guides/failure-recovery.md) — Common errors |
+| **Write tests** | [guides/testing.md](guides/testing.md) — Test strategy + pyramid |
 
-## Key Points
+## Key Facts
 
-- **Single responsibility:** Wrap `devcontainer up/exec/down` to manage workspace mounting
-- **Simple design:** Rust binary, direct subprocess calls, fail-fast error handling
-- **Multi-workspace:** Multiple workspaces can be mounted simultaneously; each gets its own `dcx-` prefixed mount
-- **7 commands:** 6 core subcommands (`dcx up`, `dcx exec`, `dcx down`, `dcx clean`, `dcx status`, `dcx doctor`) plus `dcx completions` for shell completion — everything else passes through to `devcontainer`
-- **CLI-first:** Wraps the `devcontainer` CLI; VS Code "Reopen in Container" is not supported (use `dcx up` + "Attach to Running Container" instead)
-- **Idempotent:** Safe to call `dcx up` multiple times; verifies mount health and reuses if valid
-- **Self-managing:** `dcx` auto-creates the relay directory and tracks mounts via naming convention — no state files
-- **No locking:** Avoid concurrent `dcx up` + `dcx down` for same workspace (limitation for simplicity)
+- **Single binary:** Rust (no shell deps, cross-platform Linux + macOS)
+- **7 commands:** up, exec, down, clean, status, doctor + pass-through
+- **Multi-workspace:** Each mount isolated (agent A can't access project B)
+- **No state files:** Filesystem is source of truth (naming convention)
+- **Idempotent:** Safe to call commands multiple times
+- **Phase 12 complete:** --purge, --dry-run, volume cleanup ✅
 
-## v1.0 Scope
+## File Structure
 
-**In:** Linux and macOS, multiple simultaneous workspaces, warning before mounting non-owned directories, recovery from stale mounts, auto-creation of relay directory, `--dry-run` for `dcx up` and `dcx clean`, shell completions via `clap`
-**Out:** Windows, read-only mounts, concurrent operations on same workspace, automatic Colima setup, VS Code "Reopen in Container" integration
+```
+specs/
+├── README.md              ← you are here
+├── architecture.md        ← behavior spec (AUTHORITATIVE)
+├── ROADMAP.md             ← phases, status, standards
+├── guides/                ← user documentation
+│   ├── setup.md
+│   ├── failure-recovery.md
+│   └── testing.md
+└── impl/                  ← implementation plans
+    └── phase-12-clean-ux.md
+```
 
-See [architecture.md](architecture.md) for design details and [Constraints](architecture.md#constraints) for scope.
-
----
-
-## How to Navigate
-
-1. **Want to understand how dcx works?** → Start with [architecture.md](architecture.md)
-2. **Setting up dcx?** → [guides/setup.md](guides/setup.md)
-3. **Having trouble?** → [guides/failure-recovery.md](guides/failure-recovery.md)
-4. **Contributing or implementing new features?** → [ROADMAP.md](ROADMAP.md) + [impl/](impl/) phase plans
-5. **Working on tests?** → [guides/testing.md](guides/testing.md)
+**Principle:** `architecture.md` describes WHAT should happen. `impl/` describes HOW to build it. No duplication.
