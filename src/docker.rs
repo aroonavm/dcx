@@ -402,6 +402,14 @@ mod tests {
         assert_eq!(extract_image_field(json), None);
     }
 
+    #[test]
+    fn extract_image_field_truncates_at_escaped_quote() {
+        // The simple scanner doesn't handle escaped quotes — it stops at the first `"`.
+        // This documents the known limitation: the value is truncated before the escape.
+        let json = r#"{ "image": "my-image:\"tag\"" }"#;
+        assert_eq!(extract_image_field(json), Some(r"my-image:\".to_string()));
+    }
+
     // --- get_base_image_name ---
 
     #[test]

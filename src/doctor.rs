@@ -278,4 +278,11 @@ mod tests {
             Some("0.8.1".to_string())
         );
     }
+
+    #[test]
+    fn parse_version_prerelease_suffix_returns_none() {
+        // Pre-release suffixes like `-rc1` make the last part non-numeric,
+        // so the token is not recognised as a version string.
+        assert_eq!(parse_version_str("1.2.0-rc1"), None);
+    }
 }
