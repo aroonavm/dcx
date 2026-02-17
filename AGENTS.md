@@ -78,7 +78,7 @@ dcx/
 
 ## Work in Progress
 
-Current focus: See `IMPLEMENTATION_PLAN.md`
+Current focus: See `TODO.md`
 
 ## When Adding Features
 
@@ -87,6 +87,6 @@ Current focus: See `IMPLEMENTATION_PLAN.md`
 3. Update user guides if needed
 4. Write tests first (TDD)
 5. Implement following spec
-6. Update `IMPLEMENTATION_PLAN.md`
+6. Update `TODO.md`
 7. Run `make check`
 8. Commit all spec + code changes together

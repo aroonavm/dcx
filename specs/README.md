@@ -13,7 +13,7 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
 | **Install dcx** | [guides/setup.md](guides/setup.md) — Prerequisites, setup steps |
 | **Fix a problem** | [guides/failure-recovery.md](guides/failure-recovery.md) — Common errors |
 | **Write tests** | [guides/testing.md](guides/testing.md) — Test strategy + pyramid |
-| **Start development** | Read [../AGENTS.md](../AGENTS.md) and [../IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) |
+| **Start development** | Read [../AGENTS.md](../AGENTS.md) and [../TODO.md](../TODO.md) |
 
 ## Key Facts
 
@@ -29,7 +29,7 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
 ```
 .
 ├── AGENTS.md              ← Developer reference (build, test, conventions)
-├── IMPLEMENTATION_PLAN.md ← Work tracking (phases completed, current status)
+├── TODO.md ← Work tracking (phases completed, current status)
 └── specs/
     ├── README.md          ← You are here
     ├── architecture.md    ← WHAT (behaviors, commands, edge cases)
@@ -42,4 +42,4 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
         └── testing.md
 ```
 
-**Pattern:** `architecture.md` describes WHAT. Implementation specs describe HOW (referencing behavior, no duplication). Work tracking is in `IMPLEMENTATION_PLAN.md`, not in specs.
+**Pattern:** `architecture.md` describes WHAT. Implementation specs describe HOW (referencing behavior, no duplication). Work tracking is in `TODO.md`, not in specs.
