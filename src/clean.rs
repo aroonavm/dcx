@@ -31,8 +31,8 @@ struct CleanPlan {
     container_id: Option<String>,
     /// Runtime image ID (populated during scan if container exists)
     runtime_image_id: Option<String>,
-    /// Build image name (populated when purge=true)
-    build_image_name: Option<String>,
+    /// Whether a `dcx-base:<mount_name>` tag exists (populated when purge=true)
+    has_base_image_tag: bool,
     /// Volumes associated with the container (populated when purge=true)
     volumes: Vec<String>,
     /// Whether the mount is currently mounted
@@ -108,7 +108,7 @@ fn remove_mount_dir(mount_point: &Path) -> Result<(), String> {
 
 /// Execute the cleanup for a single plan.
 ///
-/// Performs: stop container, remove container, remove runtime image, remove build image (if purge),
+/// Performs: stop container, remove container, remove runtime image, remove base image tag (if purge),
 /// remove volumes (if purge), unmount, remove directory.
 /// Returns (state_before, action_taken) tuple.
 fn execute_one(plan: &CleanPlan) -> Result<(String, String), String> {
@@ -125,11 +125,13 @@ fn execute_one(plan: &CleanPlan) -> Result<(String, String), String> {
         docker::remove_image(image_id)?;
     }
 
-    // Remove build image if purge is enabled
-    if let Some(ref build_image) = plan.build_image_name
-        && let Err(e) = docker::remove_base_image(build_image)
+    // Remove base image tag if purge is enabled.
+    // Uses `dcx-base:<mount_name>` tag created during `dcx up`.
+    // Removing the tag only deletes the image if it's the last reference.
+    if plan.has_base_image_tag
+        && let Err(e) = docker::remove_base_image_tag(&plan.mount_name)
     {
-        eprintln!("Note: Could not remove build image {build_image}: {e}");
+        eprintln!("Note: Could not remove base image tag: {e}");
     }
 
     // Remove volumes if purge is enabled
@@ -145,7 +147,9 @@ fn execute_one(plan: &CleanPlan) -> Result<(String, String), String> {
     }
 
     // Remove directory (mandatory)
-    remove_mount_dir(&plan.mount_point)?;
+    if plan.mount_point.exists() {
+        remove_mount_dir(&plan.mount_point)?;
+    }
 
     let action = if plan.container_id.is_some() {
         "stopped, removed".to_string()
@@ -160,19 +164,15 @@ fn execute_one(plan: &CleanPlan) -> Result<(String, String), String> {
 ///
 /// This is a read-only operation that queries mount table, container state, and image information.
 /// Does NOT mutate any state.
-fn scan_one(mount_point: &Path, purge: bool, workspace: Option<&Path>) -> CleanPlan {
+fn scan_one(mount_point: &Path, purge: bool) -> CleanPlan {
     let mount_name = mount_point
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    // Check if mounted and determine state
+    // Check if mounted
     let table = platform::read_mount_table().unwrap_or_default();
     let is_mounted = mount_table::find_mount_source(&table, mount_point).is_some();
-    let mount_source = mount_table::find_mount_source(&table, mount_point);
-
-    // Resolve workspace: prefer caller-supplied, fall back to mount table
-    let workspace_path: Option<&Path> = workspace.or_else(|| mount_source.map(Path::new));
 
     // Check for container
     let container_id = docker::query_container_any(mount_point);
@@ -188,11 +188,12 @@ fn scan_one(mount_point: &Path, purge: bool, workspace: Option<&Path>) -> CleanP
         None
     };
 
-    // Get build image name and volumes only when purge=true
-    let build_image_name = if purge {
-        workspace_path.and_then(docker::get_base_image_name)
+    // Check for dcx-base:<mount_name> tag (created during dcx up).
+    // This works regardless of whether the mount/workspace still exists.
+    let has_base_image_tag = if purge {
+        docker::image_exists(&format!("dcx-base:{mount_name}"))
     } else {
-        None
+        false
     };
 
     let volumes = if purge {
@@ -211,7 +212,7 @@ fn scan_one(mount_point: &Path, purge: bool, workspace: Option<&Path>) -> CleanP
         state,
         container_id: container_id.clone(),
         runtime_image_id,
-        build_image_name,
+        has_base_image_tag,
         volumes,
         is_mounted,
     }
@@ -242,20 +243,28 @@ fn categorize_mount_state(mount_point: &Path, has_container: bool) -> String {
 }
 
 /// Perform full cleanup for a single mount entry: stop container, remove container, remove
-/// runtime image, optionally remove build image and volumes, unmount, remove dir.
+/// runtime image, optionally remove base image tag and volumes, unmount, remove dir.
 ///
 /// `container_id` is optional; if None, container/image removal is skipped.
-/// `purge`: if true, also removes the build image and Docker volumes. Non-fatal on failure.
+/// `purge`: if true, also removes the `dcx-base:<mount_name>` tag and Docker volumes.
 /// Returns a tuple of (state_before_cleaning, action_taken).
 fn clean_one(
     mount_point: &Path,
     container_id: Option<&str>,
     purge: bool,
-    workspace: Option<&Path>,
 ) -> Result<(String, String), String> {
     // Determine state before cleanup
     let has_container = container_id.is_some();
     let state_before = categorize_mount_state(mount_point, has_container);
+
+    let mount_name = mount_point
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    // Read mount table BEFORE any mutations (stop/remove may affect it).
+    let table = platform::read_mount_table().unwrap_or_default();
+    let is_mounted = mount_table::find_mount_source(&table, mount_point).is_some();
 
     // Stop the container (idempotent if not found)
     docker::stop_container(mount_point)?;
@@ -270,24 +279,14 @@ fn clean_one(
         docker::remove_image(&image_id)?;
     }
 
-    // Resolve workspace source: prefer the caller-supplied workspace path,
-    // fall back to mount table lookup (needed for --all mode where workspace is unknown).
-    let table = platform::read_mount_table().unwrap_or_default();
-    let mount_source = mount_table::find_mount_source(&table, mount_point);
-    let workspace_path: Option<&Path> = workspace.or_else(|| mount_source.map(Path::new));
-
-    // Optionally remove the build image (e.g. dcx-dev:latest).
-    // Non-fatal: the image may be shared with other workspaces or already removed.
-    if purge
-        && let Some(ws) = workspace_path
-        && let Some(build_image) = docker::get_base_image_name(ws)
-        && let Err(e) = docker::remove_base_image(&build_image)
-    {
-        eprintln!("Note: Could not remove build image {build_image}: {e}");
+    // Remove base image tag if purge is enabled.
+    // Uses `dcx-base:<mount_name>` created during `dcx up`. Non-fatal.
+    if purge && let Err(e) = docker::remove_base_image_tag(&mount_name) {
+        eprintln!("Note: Could not remove base image tag: {e}");
     }
 
     // Unmount if mounted.
-    if mount_source.is_some() {
+    if is_mounted {
         do_unmount(mount_point)?;
     }
 
@@ -352,13 +351,13 @@ pub fn run_clean(
         let mount_point = relay.join(&name);
 
         if mount_point.exists() || purge {
-            let plan = scan_one(&mount_point, purge, Some(&workspace));
+            let plan = scan_one(&mount_point, purge);
             let dry_run_plan = format::DryRunPlan {
                 mount_name: plan.mount_name,
                 state: plan.state,
                 container_id: plan.container_id,
                 runtime_image_id: plan.runtime_image_id,
-                build_image_name: plan.build_image_name,
+                has_base_image_tag: plan.has_base_image_tag,
                 volumes: plan.volumes,
                 is_mounted: plan.is_mounted,
             };
@@ -428,14 +427,9 @@ pub fn run_clean(
             }
         }
 
-        // Clean if there's anything to do: mount exists, or purge wants build image
+        // Clean if there's anything to do: mount exists, or purge wants base image tag
         if mount_point.exists() || purge {
-            match clean_one(
-                &mount_point,
-                container_any.as_deref(),
-                purge,
-                Some(&workspace),
-            ) {
+            match clean_one(&mount_point, container_any.as_deref(), purge) {
                 Ok((was_state, action)) => {
                     println!("Cleaned {}:", workspace.display());
                     println!(
@@ -490,7 +484,7 @@ pub fn run_clean(
                 }
 
                 // Mounted but no container for this mount - clean it up (no purge for orphaned)
-                match clean_one(&path, None, false, None) {
+                match clean_one(&path, None, false) {
                     Ok((was_state, action)) => {
                         println!("  {}  was: {}  → {}", name, was_state, action);
                         cleaned_count += 1;
@@ -534,13 +528,13 @@ pub fn run_clean(
             let plans: Vec<format::DryRunPlan> = entry_paths
                 .iter()
                 .map(|mp| {
-                    let plan = scan_one(mp, purge, None);
+                    let plan = scan_one(mp, purge);
                     format::DryRunPlan {
                         mount_name: plan.mount_name,
                         state: plan.state,
                         container_id: plan.container_id,
                         runtime_image_id: plan.runtime_image_id,
-                        build_image_name: plan.build_image_name,
+                        has_base_image_tag: plan.has_base_image_tag,
                         volumes: plan.volumes,
                         is_mounted: plan.is_mounted,
                     }
@@ -597,7 +591,7 @@ pub fn run_clean(
 
             let container_id = docker::query_container_any(mount_point);
 
-            match clean_one(mount_point, container_id.as_deref(), purge, None) {
+            match clean_one(mount_point, container_id.as_deref(), purge) {
                 Ok((was_state, action)) => {
                     cleaned.push(CleanEntry {
                         workspace: None,
@@ -642,6 +636,21 @@ pub fn run_clean(
             }
             Err(e) => {
                 eprintln!("Warning: Could not clean orphaned images: {e}");
+            }
+        }
+
+        // With --purge, sweep any remaining dcx-base:* tags (catches tags whose
+        // mount dirs were already removed externally).
+        if purge {
+            progress::step("Cleaning up base image tags...");
+            match docker::clean_all_base_image_tags() {
+                Ok(removed) if removed > 0 => {
+                    progress::step(&format!("Removed {removed} base image tag(s)."));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Warning: Could not clean base image tags: {e}");
+                }
             }
         }
 
@@ -742,48 +751,22 @@ mod tests {
     // --- scan_one ---
 
     #[test]
-    fn scan_one_finds_build_image_from_workspace_when_mount_missing() {
-        // Simulates `dcx clean --purge` after a previous `dcx clean` removed the mount.
-        // The mount point doesn't exist, but the workspace has devcontainer.json.
-        let workspace = tempfile::tempdir().unwrap();
-        let devcontainer_dir = workspace.path().join(".devcontainer");
-        std::fs::create_dir_all(&devcontainer_dir).unwrap();
-        std::fs::write(
-            devcontainer_dir.join("devcontainer.json"),
-            r#"{ "image": "dcx-dev:latest" }"#,
-        )
-        .unwrap();
-
-        // Mount point that does NOT exist (simulates post-clean state)
+    fn scan_one_no_base_image_tag_without_purge() {
+        // Without purge, scan_one should not check for base image tags.
         let fake_mount = PathBuf::from("/tmp/dcx-nonexistent-00000000");
-
-        let plan = scan_one(&fake_mount, true, Some(workspace.path()));
-
-        assert_eq!(
-            plan.build_image_name.as_deref(),
-            Some("dcx-dev:latest"),
-            "purge should find build image from workspace even when mount is gone"
+        let plan = scan_one(&fake_mount, false);
+        assert!(
+            !plan.has_base_image_tag,
+            "without purge, has_base_image_tag should be false"
         );
     }
 
     #[test]
-    fn scan_one_no_build_image_without_purge() {
-        let workspace = tempfile::tempdir().unwrap();
-        let devcontainer_dir = workspace.path().join(".devcontainer");
-        std::fs::create_dir_all(&devcontainer_dir).unwrap();
-        std::fs::write(
-            devcontainer_dir.join("devcontainer.json"),
-            r#"{ "image": "dcx-dev:latest" }"#,
-        )
-        .unwrap();
-
+    fn scan_one_nonexistent_mount_is_empty_dir() {
         let fake_mount = PathBuf::from("/tmp/dcx-nonexistent-00000000");
-
-        let plan = scan_one(&fake_mount, false, Some(workspace.path()));
-
-        assert_eq!(
-            plan.build_image_name, None,
-            "without purge, build image should not be resolved"
-        );
+        let plan = scan_one(&fake_mount, false);
+        assert_eq!(plan.state, "empty dir");
+        assert!(!plan.is_mounted);
+        assert!(plan.container_id.is_none());
     }
 }

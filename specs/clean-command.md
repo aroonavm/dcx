@@ -15,15 +15,20 @@ struct CleanPlan {
     state: String,                      // "running", "orphaned", "stale", "empty"
     container_id: Option<String>,
     runtime_image_id: Option<String>,
-    build_image_name: Option<String>,   // only when purge=true
+    has_base_image_tag: bool,           // dcx-base:<mount_name> exists (purge only)
     volumes: Vec<String>,               // only when purge=true
     is_mounted: bool,
 }
 ```
 
 **Functions:**
-- `scan_one(mount_point, purge) → CleanPlan` — Read-only. Queries mount table, containers, images. When `purge=true`, also queries build image name and container volumes.
+- `scan_one(mount_point, purge) → CleanPlan` — Read-only. Queries mount table, containers, images. When `purge=true`, also checks for `dcx-base:<mount_name>` tag and container volumes.
 - `execute_one(plan) → Result<(state, action)>` — Executes cleanup based on plan.
+
+### Base Image Discovery via Docker Tags
+**Problem:** After `dcx clean` removes the mount directory, a subsequent `dcx clean --purge` can't find the base image because the workspace path (needed to read devcontainer.json) is no longer reachable.
+**Solution:** During `dcx up`, the base image is tagged as `dcx-base:<mount-name>`. Cleanup uses `docker rmi dcx-base:<mount-name>` which only deletes the underlying image if no other tags reference it.
+**Fallback:** `--all --purge` does a final sweep of all `dcx-base:*` tags.
 
 ### Volume Discovery Strategy
 **Problem:** Must capture volume names BEFORE removing container, else lose reference.

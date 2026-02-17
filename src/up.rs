@@ -336,6 +336,15 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
         return exit_codes::RUNTIME_ERROR;
     }
 
+    // 12. Tag the base image for later cleanup by `dcx clean --purge`.
+    // Non-fatal: if tagging fails (e.g. no "image" field in devcontainer.json),
+    // purge will simply skip base image removal for this workspace.
+    if let Some(base_image) = docker::get_base_image_name(&workspace)
+        && let Err(e) = docker::tag_base_image(&base_image, &name)
+    {
+        eprintln!("Warning: Could not tag base image: {e}");
+    }
+
     progress::step("Done.");
     exit_codes::SUCCESS
 }

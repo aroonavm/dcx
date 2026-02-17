@@ -36,9 +36,24 @@ Remove image. With `force=false`, fails if other images depend on it. With `forc
 
 ### Build Image Name Detection
 ```rust
-fn get_build_image_name(devcontainer_path: &str) -> Result<Option<String>>
+fn get_base_image_name(workspace: &Path) -> Option<String>
 ```
 Read `image` field from devcontainer.json. Returns None if not specified or file not found.
+
+### Base Image Tagging
+During `dcx up`, the base image is tagged as `dcx-base:<mount-name>` so that `dcx clean --purge` can find and remove it by convention — no need to resolve workspace paths.
+
+```rust
+fn tag_base_image(base_image: &str, mount_name: &str) -> Result<()>
+fn remove_base_image_tag(mount_name: &str) -> Result<()>
+fn clean_all_base_image_tags() -> Result<usize>
+fn image_exists(image: &str) -> bool
+```
+
+- `tag_base_image`: Creates `dcx-base:<mount_name>` alias. Called after successful `devcontainer up`.
+- `remove_base_image_tag`: Removes the tag. Only deletes the underlying image if no other tags reference it. Ignores "No such image" errors.
+- `clean_all_base_image_tags`: Lists all `dcx-base:*` tags and removes them. Used by `--all --purge` as a final sweep.
+- `image_exists`: Checks if a Docker image exists locally via `docker image inspect`.
 
 ## Volume Operations
 

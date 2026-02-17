@@ -137,42 +137,84 @@ fn extract_image_field(content: &str) -> Option<String> {
     if value.is_empty() { None } else { Some(value) }
 }
 
-/// Remove a build image by name if no containers depend on it.
+/// Check if a Docker image exists locally.
+pub fn image_exists(image: &str) -> bool {
+    cmd::run_capture("docker", &["image", "inspect", image])
+        .map(|out| out.status == 0)
+        .unwrap_or(false)
+}
+
+/// The Docker repository used for dcx base image tags.
 ///
-/// Checks `docker ps -a --filter ancestor=<image>` first. If containers are found,
-/// returns an error without attempting deletion. Otherwise runs `docker rmi <name>`
-/// without `--force` so Docker can refuse if another image was built FROM this one.
-pub fn remove_base_image(image_name: &str) -> Result<(), String> {
-    let check = cmd::run_capture(
+/// During `dcx up`, the base image (from devcontainer.json `"image"` field) is tagged
+/// as `dcx-base:<mount-name>`. This lets `dcx clean --purge` find and remove base images
+/// by convention, without needing to resolve workspace paths.
+const BASE_IMAGE_REPO: &str = "dcx-base";
+
+/// Tag a base image with a dcx-managed reference.
+///
+/// Creates `dcx-base:<mount_name>` as an alias for `base_image`. Removing this tag
+/// later only deletes the underlying image if no other tags reference it.
+pub fn tag_base_image(base_image: &str, mount_name: &str) -> Result<(), String> {
+    let tag = format!("{BASE_IMAGE_REPO}:{mount_name}");
+    let out = cmd::run_capture("docker", &["tag", base_image, &tag])?;
+    if out.status != 0 {
+        return Err(format!("Failed to tag base image: {}", out.stderr.trim()));
+    }
+    Ok(())
+}
+
+/// Remove the dcx base image tag for a mount.
+///
+/// Runs `docker rmi dcx-base:<mount_name>`. This only removes the tag; the underlying
+/// image is deleted only if this was the last reference. Non-fatal if the tag doesn't exist.
+pub fn remove_base_image_tag(mount_name: &str) -> Result<(), String> {
+    let tag = format!("{BASE_IMAGE_REPO}:{mount_name}");
+    let out = cmd::run_capture("docker", &["rmi", &tag])?;
+    if out.status != 0 {
+        let stderr = out.stderr.trim();
+        // Ignore "No such image" — tag was already removed or never created
+        if stderr.contains("No such image") {
+            return Ok(());
+        }
+        return Err(format!("Failed to remove base image tag: {stderr}"));
+    }
+    Ok(())
+}
+
+/// Remove all dcx base image tags.
+///
+/// Lists all `dcx-base:*` images and removes each tag. Returns the count of removed tags.
+pub fn clean_all_base_image_tags() -> Result<usize, String> {
+    let out = cmd::run_capture(
         "docker",
         &[
-            "ps",
-            "-a",
-            "--filter",
-            &format!("ancestor={image_name}"),
+            "images",
+            BASE_IMAGE_REPO,
             "--format",
-            "{{.ID}}",
+            "{{.Repository}}:{{.Tag}}",
         ],
     )?;
-    let ids: Vec<&str> = check
-        .stdout
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .collect();
-    if !ids.is_empty() {
-        return Err(format!(
-            "Base image {image_name} is still in use by {} container(s).",
-            ids.len()
-        ));
-    }
-    let out = cmd::run_capture("docker", &["rmi", image_name])?;
     if out.status != 0 {
         return Err(format!(
-            "Failed to remove base image: {}",
+            "Failed to list base image tags: {}",
             out.stderr.trim()
         ));
     }
-    Ok(())
+
+    let mut removed = 0;
+    for tag in out.stdout.lines() {
+        let tag = tag.trim();
+        if tag.is_empty() {
+            continue;
+        }
+        let rm_out = cmd::run_capture("docker", &["rmi", tag])?;
+        if rm_out.status == 0 {
+            removed += 1;
+        }
+        // Non-fatal: skip tags that fail to remove
+    }
+    Ok(removed)
 }
 
 /// Find all dcx-managed stopped containers and remove them.

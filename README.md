@@ -9,7 +9,7 @@ Dynamic workspace mounting wrapper for Colima devcontainers.
 sudo apt install bindfs
 # Edit ~/.config/colima/default/colima.yaml to mount ~/.colima-mounts
 colima stop && colima start
-cp dcx ~/.local/bin/dcx && chmod +x ~/.local/bin/dcx
+cargo install --path .   # installs dcx to ~/.cargo/bin/
 
 # Usage
 dcx up                                       # Start devcontainer with mount
@@ -28,4 +28,7 @@ dcx down                                     # Stop container and cleanup
 
 ```bash
 cargo build --release
+cargo install --path .
 ```
+
+This installs `dcx` to `~/.cargo/bin/`. Ensure `~/.cargo/bin` is in your `PATH` (add `export PATH="$HOME/.cargo/bin:$PATH"` to your shell rc file if needed).

@@ -96,8 +96,8 @@ pub struct DryRunPlan {
     pub container_id: Option<String>,
     /// Runtime image ID if present
     pub runtime_image_id: Option<String>,
-    /// Build image name if purge=true
-    pub build_image_name: Option<String>,
+    /// Whether a dcx-base:<mount_name> tag exists (purge=true)
+    pub has_base_image_tag: bool,
     /// Volumes if purge=true
     pub volumes: Vec<String>,
     /// Whether mounted
@@ -120,8 +120,11 @@ pub fn format_dry_run(plans: &[DryRunPlan]) -> String {
         if let Some(image_id) = &plan.runtime_image_id {
             lines.push(format!("    - Remove runtime image {}", image_id));
         }
-        if let Some(build_image) = &plan.build_image_name {
-            lines.push(format!("    - Remove build image {}  [purge]", build_image));
+        if plan.has_base_image_tag {
+            lines.push(format!(
+                "    - Remove base image tag dcx-base:{}  [purge]",
+                plan.mount_name
+            ));
         }
         for volume in &plan.volumes {
             lines.push(format!("    - Remove volume {}  [purge]", volume));
@@ -364,7 +367,7 @@ mod tests {
             state: "running".to_string(),
             container_id: Some("abc123def456".to_string()),
             runtime_image_id: Some("sha256:xyz".to_string()),
-            build_image_name: None,
+            has_base_image_tag: false,
             volumes: vec![],
             is_mounted: true,
         }];
@@ -391,14 +394,14 @@ mod tests {
             state: "running".to_string(),
             container_id: Some("abc123".to_string()),
             runtime_image_id: Some("sha256:xyz".to_string()),
-            build_image_name: Some("dcx-dev:latest".to_string()),
+            has_base_image_tag: true,
             volumes: vec!["dcx-shellhistory-abc123".to_string()],
             is_mounted: true,
         }];
         let out = format_dry_run(&plans);
         assert!(out.contains("[purge]"), "missing [purge] marker");
         assert!(
-            out.contains("Remove build image dcx-dev:latest"),
+            out.contains("Remove base image tag dcx-base:dcx-myproject-a1b2c3d4"),
             "got: {out}"
         );
         assert!(
@@ -414,7 +417,7 @@ mod tests {
             state: "orphaned".to_string(),
             container_id: None,
             runtime_image_id: None,
-            build_image_name: None,
+            has_base_image_tag: false,
             volumes: vec![],
             is_mounted: true,
         }];
@@ -436,7 +439,7 @@ mod tests {
                 state: "running".to_string(),
                 container_id: Some("abc123".to_string()),
                 runtime_image_id: None,
-                build_image_name: None,
+                has_base_image_tag: false,
                 volumes: vec![],
                 is_mounted: true,
             },
@@ -445,7 +448,7 @@ mod tests {
                 state: "orphaned".to_string(),
                 container_id: None,
                 runtime_image_id: None,
-                build_image_name: None,
+                has_base_image_tag: false,
                 volumes: vec![],
                 is_mounted: false,
             },
