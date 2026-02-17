@@ -39,6 +39,8 @@ Tests that build the `dcx` binary and run it as a subprocess against controlled 
 
 Shell scripts that test the full mount → container → cleanup lifecycle. These are slow and require the full environment. Covers all behaviors that involve real bindfs mounts, Docker containers, and Colima interaction.
 
+**Guard:** `require_e2e_deps` — skips if Colima, Docker, bindfs, or devcontainer CLI is missing.
+
 **Structure:**
 
 ```
@@ -54,4 +56,25 @@ tests/
   │   ├── test_edge_cases.sh
   │   └── test_stale_mounts.sh
   └── ... (Rust integration tests at tests/*.rs)
+```
+
+## Layer 3b: Docker-only E2E Tests (no Colima/bindfs)
+
+Shell scripts that test dcx's argument forwarding to `devcontainer` using Docker alone. These run on any machine with Docker and the devcontainer CLI — no Colima or bindfs required.
+
+**Guard:** `require_docker_deps` — skips if Docker or devcontainer CLI is missing.
+
+**What they cover:**
+- Unknown subcommands forwarded to devcontainer with correct args
+- `dcx up --dry-run` works without bindfs
+- Exit code propagation from devcontainer
+- `dcx doctor` reports missing dependencies without crashing
+
+**Structure:**
+
+```
+tests/
+  └── e2e/
+      ├── Dockerfile.test          # Minimal test image (rust + git + node + devcontainer CLI, no bindfs)
+      └── test_passthrough.sh      # Docker-only pass-through tests
 ```

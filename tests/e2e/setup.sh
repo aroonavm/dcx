@@ -32,6 +32,20 @@ require_e2e_deps() {
     fi
 }
 
+# Call at the top of tests that only need Docker + devcontainer (no Colima/bindfs).
+require_docker_deps() {
+    for cmd in docker devcontainer; do
+        if ! command -v "$cmd" &>/dev/null; then
+            echo "SKIP ALL: '$cmd' not found"
+            exit 0
+        fi
+    done
+    if ! docker info &>/dev/null 2>&1; then
+        echo "SKIP ALL: Docker is not available"
+        exit 0
+    fi
+}
+
 # --- Test counters ---
 
 PASS=0

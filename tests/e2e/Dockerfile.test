@@ -1,0 +1,20 @@
+FROM rust:slim-bookworm
+
+LABEL org.opencontainers.image.title="dcx E2E Test Container" \
+      org.opencontainers.image.description="Minimal test environment for dcx pass-through E2E tests" \
+      project="dcx" \
+      purpose="testing"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  git \
+  nodejs \
+  npm \
+  pkg-config \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN rustup component add clippy rustfmt
+
+# devcontainer CLI (needed for pass-through tests)
+RUN npm install -g @devcontainers/cli
+
+WORKDIR /workspace

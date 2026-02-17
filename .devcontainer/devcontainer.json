@@ -1,18 +1,11 @@
 {
     "name": "dcx Development",
-    "image": "dcx-dev:latest",
     "build": {
-        "dockerfile": "Dockerfile",
-        "args": {
-            "TZ": "${localEnv:TZ:America/Los_Angeles}",
-            "GIT_DELTA_VERSION": "0.18.2",
-            "ZSH_IN_DOCKER_VERSION": "1.2.0"
-        }
+        "dockerfile": "Dockerfile"
     },
     "customizations": {
         "vscode": {
             "extensions": [
-                "anthropic.claude-code",
                 "rust-lang.rust-analyzer",
                 "eamodio.gitlens",
                 "tamasfe.even-better-toml"
@@ -24,28 +17,13 @@
                     "editor.defaultFormatter": "rust-lang.rust-analyzer",
                     "editor.formatOnSave": true
                 },
-                "rust-analyzer.checkOnSave.command": "clippy",
-                "terminal.integrated.defaultProfile.linux": "zsh",
-                "terminal.integrated.profiles.linux": {
-                    "bash": {
-                        "path": "bash",
-                        "icon": "terminal-bash"
-                    },
-                    "zsh": {
-                        "path": "zsh"
-                    }
-                }
+                "rust-analyzer.checkOnSave.command": "clippy"
             }
         }
     },
-    "remoteUser": "rust",
-    "mounts": [
-        "source=dcx-shellhistory-${devcontainerId},target=/commandhistory,type=volume",
-        "source=${localEnv:HOME}/.claude,target=/home/rust/.claude,type=bind"
-    ],
+    "remoteUser": "dev",
     "containerEnv": {
-        "RUST_BACKTRACE": "1",
-        "CLAUDE_CONFIG_DIR": "/home/rust/.claude"
+        "RUST_BACKTRACE": "1"
     },
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
     "workspaceFolder": "/workspace"
