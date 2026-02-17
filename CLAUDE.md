@@ -13,26 +13,6 @@ Read `specs/README.md` before making any changes — the specs are the source of
 - **Fail fast:** Errors exit immediately with clear messages. No retries (except `dcx clean` which continues on individual failures).
 - **Simple over clever:** Direct subprocess calls, no trait abstractions, no unnecessary generics.
 
-## Specification Structure
-
-**Core Files (Never duplicate content across these):**
-- `specs/architecture.md` — WHAT: all command behaviors, edge cases, exit codes, platform notes
-- `specs/mount-strategy.md` — HOW: bindfs mounting implementation details
-- `specs/clean-command.md` — HOW: clean command logic and volume handling
-- `specs/docker-helpers.md` — HOW: docker wrapper functions
-- `specs/guides/` — User documentation (setup, troubleshooting)
-- `AGENTS.md` (root) — Developer reference only: build, test, code patterns (NOT status)
-- `IMPLEMENTATION_PLAN.md` — Work tracking (created/updated per phase)
-
-**Pattern:** Reference behavior in `specs/architecture.md` from HOW specs instead of duplicating. Example: "See [architecture.md § dcx clean](specs/architecture.md#cmd-clean) for behavior spec."
-
-**When adding features:**
-1. Update `specs/architecture.md` (WHAT: new behavior)
-2. Create or update `specs/topic-name.md` (HOW: implementation)
-3. Update `AGENTS.md` if patterns/conventions change
-4. Update `IMPLEMENTATION_PLAN.md` with progress
-5. Keep `specs/guides/` current with user-facing changes
-
 ## Commands
 
 - `make check` — run all checks (test + lint + format). Run before considering any phase done.
