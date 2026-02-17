@@ -160,7 +160,7 @@ fn execute_one(plan: &CleanPlan) -> Result<(String, String), String> {
 ///
 /// This is a read-only operation that queries mount table, container state, and image information.
 /// Does NOT mutate any state.
-fn scan_one(mount_point: &Path, purge: bool) -> CleanPlan {
+fn scan_one(mount_point: &Path, purge: bool, workspace: Option<&Path>) -> CleanPlan {
     let mount_name = mount_point
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -169,7 +169,10 @@ fn scan_one(mount_point: &Path, purge: bool) -> CleanPlan {
     // Check if mounted and determine state
     let table = platform::read_mount_table().unwrap_or_default();
     let is_mounted = mount_table::find_mount_source(&table, mount_point).is_some();
-    let workspace_source = mount_table::find_mount_source(&table, mount_point);
+    let mount_source = mount_table::find_mount_source(&table, mount_point);
+
+    // Resolve workspace: prefer caller-supplied, fall back to mount table
+    let workspace_path: Option<&Path> = workspace.or_else(|| mount_source.map(Path::new));
 
     // Check for container
     let container_id = docker::query_container_any(mount_point);
@@ -187,9 +190,7 @@ fn scan_one(mount_point: &Path, purge: bool) -> CleanPlan {
 
     // Get build image name and volumes only when purge=true
     let build_image_name = if purge {
-        workspace_source
-            .as_ref()
-            .and_then(|src| docker::get_base_image_name(std::path::Path::new(src)))
+        workspace_path.and_then(docker::get_base_image_name)
     } else {
         None
     };
@@ -250,6 +251,7 @@ fn clean_one(
     mount_point: &Path,
     container_id: Option<&str>,
     purge: bool,
+    workspace: Option<&Path>,
 ) -> Result<(String, String), String> {
     // Determine state before cleanup
     let has_container = container_id.is_some();
@@ -268,28 +270,31 @@ fn clean_one(
         docker::remove_image(&image_id)?;
     }
 
-    // Resolve workspace source path from mount table before unmounting.
-    // Needed for base image detection and must happen while mount is still active.
+    // Resolve workspace source: prefer the caller-supplied workspace path,
+    // fall back to mount table lookup (needed for --all mode where workspace is unknown).
     let table = platform::read_mount_table().unwrap_or_default();
-    let workspace_source = mount_table::find_mount_source(&table, mount_point);
+    let mount_source = mount_table::find_mount_source(&table, mount_point);
+    let workspace_path: Option<&Path> = workspace.or_else(|| mount_source.map(Path::new));
 
     // Optionally remove the build image (e.g. dcx-dev:latest).
     // Non-fatal: the image may be shared with other workspaces or already removed.
     if purge
-        && let Some(src) = workspace_source
-        && let Some(build_image) = docker::get_base_image_name(std::path::Path::new(src))
+        && let Some(ws) = workspace_path
+        && let Some(build_image) = docker::get_base_image_name(ws)
         && let Err(e) = docker::remove_base_image(&build_image)
     {
         eprintln!("Note: Could not remove build image {build_image}: {e}");
     }
 
     // Unmount if mounted.
-    if workspace_source.is_some() {
+    if mount_source.is_some() {
         do_unmount(mount_point)?;
     }
 
-    // Remove directory (mandatory)
-    remove_mount_dir(mount_point)?;
+    // Remove directory if it exists
+    if mount_point.exists() {
+        remove_mount_dir(mount_point)?;
+    }
 
     let action = if has_container {
         "stopped, removed".to_string()
@@ -346,8 +351,8 @@ pub fn run_clean(
         let name = mount_name(&workspace);
         let mount_point = relay.join(&name);
 
-        if mount_point.exists() {
-            let plan = scan_one(&mount_point, purge);
+        if mount_point.exists() || purge {
+            let plan = scan_one(&mount_point, purge, Some(&workspace));
             let dry_run_plan = format::DryRunPlan {
                 mount_name: plan.mount_name,
                 state: plan.state,
@@ -357,7 +362,12 @@ pub fn run_clean(
                 volumes: plan.volumes,
                 is_mounted: plan.is_mounted,
             };
-            println!("{}", format::format_dry_run(&[dry_run_plan]));
+            let output = format::format_dry_run(&[dry_run_plan]);
+            if output.trim().is_empty() {
+                println!("Nothing to clean for {}.", workspace.display());
+            } else {
+                println!("{output}");
+            }
         } else {
             println!("Nothing to clean for {}.", workspace.display());
         }
@@ -382,41 +392,50 @@ pub fn run_clean(
         let mut cleaned_count = 0;
         let mut errors = Vec::new();
 
-        // Clean current workspace's mount if it exists
-        if mount_point.exists() {
-            // Find container (running or stopped)
-            let container_any = docker::query_container_any(&mount_point);
+        // Find container (running or stopped) if mount exists
+        let container_any = if mount_point.exists() {
+            docker::query_container_any(&mount_point)
+        } else {
+            None
+        };
 
-            // If container found and running, check with user
-            #[allow(clippy::collapsible_if)]
-            if let Some(ref container_id) = container_any {
-                if docker::query_container(&mount_point).is_some() && !yes {
-                    // Container is running, prompt user
-                    let mount_name_str = mount_point
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    let entries = vec![(
-                        workspace.display().to_string(),
-                        mount_name_str,
-                        container_id.clone(),
-                    )];
-                    let prompt_text = confirm_prompt(&entries);
-                    eprintln!("{prompt_text}");
-                    eprint!("\nContinue? [y/N] ");
-                    let _ = io::stderr().flush();
-                    let stdin = io::stdin();
-                    let mut input = String::new();
-                    if stdin.lock().read_line(&mut input).is_err() {
-                        return exit_codes::RUNTIME_ERROR;
-                    }
-                    if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-                        return exit_codes::USER_ABORTED;
-                    }
+        // If container found and running, check with user
+        #[allow(clippy::collapsible_if)]
+        if let Some(ref container_id) = container_any {
+            if docker::query_container(&mount_point).is_some() && !yes {
+                // Container is running, prompt user
+                let mount_name_str = mount_point
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let entries = vec![(
+                    workspace.display().to_string(),
+                    mount_name_str,
+                    container_id.clone(),
+                )];
+                let prompt_text = confirm_prompt(&entries);
+                eprintln!("{prompt_text}");
+                eprint!("\nContinue? [y/N] ");
+                let _ = io::stderr().flush();
+                let stdin = io::stdin();
+                let mut input = String::new();
+                if stdin.lock().read_line(&mut input).is_err() {
+                    return exit_codes::RUNTIME_ERROR;
+                }
+                if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                    return exit_codes::USER_ABORTED;
                 }
             }
+        }
 
-            match clean_one(&mount_point, container_any.as_deref(), purge) {
+        // Clean if there's anything to do: mount exists, or purge wants build image
+        if mount_point.exists() || purge {
+            match clean_one(
+                &mount_point,
+                container_any.as_deref(),
+                purge,
+                Some(&workspace),
+            ) {
                 Ok((was_state, action)) => {
                     println!("Cleaned {}:", workspace.display());
                     println!(
@@ -471,7 +490,7 @@ pub fn run_clean(
                 }
 
                 // Mounted but no container for this mount - clean it up (no purge for orphaned)
-                match clean_one(&path, None, false) {
+                match clean_one(&path, None, false, None) {
                     Ok((was_state, action)) => {
                         println!("  {}  was: {}  → {}", name, was_state, action);
                         cleaned_count += 1;
@@ -515,7 +534,7 @@ pub fn run_clean(
             let plans: Vec<format::DryRunPlan> = entry_paths
                 .iter()
                 .map(|mp| {
-                    let plan = scan_one(mp, purge);
+                    let plan = scan_one(mp, purge, None);
                     format::DryRunPlan {
                         mount_name: plan.mount_name,
                         state: plan.state,
@@ -578,7 +597,7 @@ pub fn run_clean(
 
             let container_id = docker::query_container_any(mount_point);
 
-            match clean_one(mount_point, container_id.as_deref(), purge) {
+            match clean_one(mount_point, container_id.as_deref(), purge, None) {
                 Ok((was_state, action)) => {
                     cleaned.push(CleanEntry {
                         workspace: None,
@@ -718,5 +737,53 @@ mod tests {
         )];
         let out = confirm_prompt(&entries);
         assert!(out.contains("will be stopped"), "got: {out}");
+    }
+
+    // --- scan_one ---
+
+    #[test]
+    fn scan_one_finds_build_image_from_workspace_when_mount_missing() {
+        // Simulates `dcx clean --purge` after a previous `dcx clean` removed the mount.
+        // The mount point doesn't exist, but the workspace has devcontainer.json.
+        let workspace = tempfile::tempdir().unwrap();
+        let devcontainer_dir = workspace.path().join(".devcontainer");
+        std::fs::create_dir_all(&devcontainer_dir).unwrap();
+        std::fs::write(
+            devcontainer_dir.join("devcontainer.json"),
+            r#"{ "image": "dcx-dev:latest" }"#,
+        )
+        .unwrap();
+
+        // Mount point that does NOT exist (simulates post-clean state)
+        let fake_mount = PathBuf::from("/tmp/dcx-nonexistent-00000000");
+
+        let plan = scan_one(&fake_mount, true, Some(workspace.path()));
+
+        assert_eq!(
+            plan.build_image_name.as_deref(),
+            Some("dcx-dev:latest"),
+            "purge should find build image from workspace even when mount is gone"
+        );
+    }
+
+    #[test]
+    fn scan_one_no_build_image_without_purge() {
+        let workspace = tempfile::tempdir().unwrap();
+        let devcontainer_dir = workspace.path().join(".devcontainer");
+        std::fs::create_dir_all(&devcontainer_dir).unwrap();
+        std::fs::write(
+            devcontainer_dir.join("devcontainer.json"),
+            r#"{ "image": "dcx-dev:latest" }"#,
+        )
+        .unwrap();
+
+        let fake_mount = PathBuf::from("/tmp/dcx-nonexistent-00000000");
+
+        let plan = scan_one(&fake_mount, false, Some(workspace.path()));
+
+        assert_eq!(
+            plan.build_image_name, None,
+            "without purge, build image should not be resolved"
+        );
     }
 }

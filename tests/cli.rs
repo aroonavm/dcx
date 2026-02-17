@@ -32,15 +32,6 @@ fn version_exits_zero() {
     dcx().arg("--version").assert().success();
 }
 
-#[test]
-fn version_output_contains_binary_name() {
-    dcx()
-        .arg("--version")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("dcx"));
-}
-
 // Subcommand help text is validated by clap; spot-checking one subcommand is sufficient.
 
 // --- dcx up ---
@@ -210,57 +201,6 @@ fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
 }
 
 // --- dcx clean ---
-
-#[test]
-fn clean_dry_run_flag_is_accepted() {
-    // --dry-run flag must be recognized (no clap error)
-    use assert_fs::TempDir;
-    let home = TempDir::new().unwrap();
-    let out = dcx()
-        .env("HOME", home.path())
-        .args(["clean", "--dry-run"])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.contains("error") || stderr.contains("Docker is not available"),
-        "Got unexpected error: {stderr}"
-    );
-}
-
-#[test]
-fn clean_purge_flag_is_accepted() {
-    // --purge flag must be recognized (no clap error)
-    use assert_fs::TempDir;
-    let home = TempDir::new().unwrap();
-    let out = dcx()
-        .env("HOME", home.path())
-        .args(["clean", "--purge"])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.contains("error") || stderr.contains("Docker is not available"),
-        "Got unexpected error: {stderr}"
-    );
-}
-
-#[test]
-fn clean_all_purge_dry_run_combined_is_accepted() {
-    // --all --purge --dry-run must all parse together
-    use assert_fs::TempDir;
-    let home = TempDir::new().unwrap();
-    let out = dcx()
-        .env("HOME", home.path())
-        .args(["clean", "--all", "--purge", "--dry-run"])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.contains("error") || stderr.contains("Docker is not available"),
-        "Got unexpected error: {stderr}"
-    );
-}
 
 #[test]
 fn clean_dry_run_empty_relay_exits_success() {

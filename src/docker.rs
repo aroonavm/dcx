@@ -373,25 +373,6 @@ pub fn get_container_volumes(container_id: &str) -> Result<Vec<String>, String> 
 mod tests {
     use super::*;
 
-    #[test]
-    fn is_docker_available_returns_a_bool_without_panic() {
-        // Docker may or may not be running in the test environment.
-        // This smoke test verifies the function does not panic.
-        let _ = is_docker_available();
-    }
-
-    #[test]
-    fn query_container_handles_empty_output() {
-        // This test verifies the function handles empty output without panicking.
-        // In practice, this would be called with a mount point that has no containers.
-        // We can't mock docker here, so this is a logical test.
-    }
-
-    #[test]
-    fn query_container_any_handles_empty_output() {
-        // This test verifies the function handles empty output without panicking.
-    }
-
     // --- extract_image_field ---
 
     #[test]

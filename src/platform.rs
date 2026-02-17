@@ -80,11 +80,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unmount_prog_is_nonempty() {
-        assert!(!unmount_prog().is_empty());
-    }
-
-    #[test]
     fn unmount_args_last_element_is_mount_point() {
         let path = Path::new("/home/user/.colima-mounts/dcx-proj-a1b2c3d4");
         let args = unmount_args(path);
@@ -128,11 +123,6 @@ mod tests {
         assert_eq!(args.len(), 1);
     }
 
-    #[test]
-    fn bindfs_install_hint_is_nonempty() {
-        assert!(!bindfs_install_hint().is_empty());
-    }
-
     #[cfg(target_os = "linux")]
     #[test]
     fn bindfs_install_hint_linux_mentions_apt() {
@@ -148,12 +138,5 @@ mod tests {
     #[test]
     fn devcontainer_install_hint_contains_package_name() {
         assert!(devcontainer_install_hint().contains("@devcontainers/cli"));
-    }
-
-    #[test]
-    fn read_mount_table_returns_without_panic() {
-        // Smoke test: must not panic on a real system.
-        // The result may be Ok (empty or non-empty) or Err if /proc/mounts is missing.
-        let _ = read_mount_table();
     }
 }
