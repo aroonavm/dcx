@@ -1,15 +1,8 @@
-# Phase 12: Improve `dcx clean` UX {#phase-12}
+# Clean Command Implementation
 
-See [architecture.md § dcx clean](../architecture.md#cmd-clean) for complete behavior spec.
+See [architecture.md § dcx clean](architecture.md#cmd-clean) for complete behavior spec.
 
-## Changes
-
-- Replace `--include-base-image` → `--purge` (clearer: "nuke everything")
-- Add `--dry-run`: preview cleanup without executing
-- Add volume cleanup: remove Docker volumes associated with container
-- Remove backward compatibility for old flag
-
-## Design Rationale {#design}
+## Design Rationale
 
 ### Scan/Execute Split
 **Why:** Enable `--dry-run` preview without duplicating cleanup logic.
@@ -37,9 +30,9 @@ struct CleanPlan {
 **Solution:** Call `docker inspect` to capture `dcx-*` volumes BEFORE `docker rm`.
 **Fallback:** When container already gone (external removal), single-workspace mode skips volume cleanup (best-effort). With `--all --purge`, final sweep removes remaining `dcx-*` volumes.
 
-## Implementation Steps {#steps}
+## Implementation
 
-### Step 1: CLI Changes
+### CLI Changes
 **src/cli.rs** — Replace field:
 ```rust
 #[arg(long)]
@@ -51,23 +44,19 @@ dry_run: bool,    // new
 
 **src/main.rs** — Update dispatch to pass `purge, dry_run` to `run_clean()`.
 
-### Step 2: Volume Helpers
-**src/docker.rs** — Add three functions:
-- `get_container_volumes(container_id) → Result<Vec<String>>` — `docker inspect` for `dcx-*` volumes. Call BEFORE container removal.
-- `remove_volume(name) → Result<()>` — `docker volume rm <name>`. Non-fatal on failure (logged).
-- (Optional: `list_volumes()` for future cleanup sweeps)
+### Volume Helpers
+**src/docker.rs** — Add functions (see [docker-helpers.md](docker-helpers.md))
 
-### Step 3: Refactor `src/clean.rs`
+### Refactor src/clean.rs
 - Add `CleanPlan` struct
 - Add `scan_one()` function
 - Add `execute_one()` function
 - Update `run_clean()` signature: `(purge: bool, dry_run: bool)` instead of `include_base_image`
 - Add dry-run logic: if `--dry-run`, scan → format → print → exit 0
 
-### Step 4: Dry-run Formatting
+### Dry-run Formatting
 **src/format.rs** — Add:
-- `DryRunPlan` struct (same fields as `CleanPlan`)
-- `format_dry_run(plans: &[DryRunPlan]) → String` — Returns formatted preview showing what would be cleaned
+- `format_dry_run(plans: &[CleanPlan]) → String` — Preview showing what would be cleaned
 
 Example output:
 ```
@@ -81,14 +70,12 @@ Would clean:
     - Remove mount directory
 ```
 
-### Step 5: Tests (TDD)
-**Unit tests** — `format_dry_run()` with various plan combinations
-**Integration tests** — `dcx clean --dry-run`, `dcx clean --purge`, flags combine correctly, `--include-base-image` rejected
+### Tests (TDD)
+**Unit tests:**
+- `format_dry_run()` with various plan combinations
 
-## Verification {#verify}
-
-- [ ] `make check` passes
-- [ ] `dcx clean --dry-run` exits 0, shows plan, makes no changes
-- [ ] `dcx clean --purge --yes` removes: container, runtime image, build image, volumes, mount
-- [ ] `--include-base-image` is rejected with error
-- [ ] All new code covered by tests (TDD)
+**Integration tests:**
+- `dcx clean --dry-run` exits 0, shows plan, makes no changes
+- `dcx clean --purge` flag is accepted and works
+- `dcx clean --all --purge --dry-run` parses and executes correctly
+- `--include-base-image` is rejected (no backward compat)

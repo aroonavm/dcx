@@ -9,11 +9,11 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
 | I want to... | Read this |
 |--------------|-----------|
 | **Understand how dcx works** | [architecture.md](architecture.md) — Problem, solution, all command specs |
-| **See development roadmap** | [ROADMAP.md](ROADMAP.md) — Phases 0–12 status + future plans |
-| **Implement a feature** | [ROADMAP.md](ROADMAP.md) + [impl/phase-N.md](impl/) — What + how |
+| **Implement a feature** | [architecture.md](architecture.md) + relevant HOW spec (mount-strategy, clean-command, docker-helpers) |
 | **Install dcx** | [guides/setup.md](guides/setup.md) — Prerequisites, setup steps |
 | **Fix a problem** | [guides/failure-recovery.md](guides/failure-recovery.md) — Common errors |
 | **Write tests** | [guides/testing.md](guides/testing.md) — Test strategy + pyramid |
+| **Start development** | Read [../AGENTS.md](../AGENTS.md) and [../IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) |
 
 ## Key Facts
 
@@ -27,16 +27,19 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
 ## File Structure
 
 ```
-specs/
-├── README.md              ← you are here
-├── architecture.md        ← behavior spec (AUTHORITATIVE)
-├── ROADMAP.md             ← phases, status, standards
-├── guides/                ← user documentation
-│   ├── setup.md
-│   ├── failure-recovery.md
-│   └── testing.md
-└── impl/                  ← implementation plans
-    └── phase-12-clean-ux.md
+.
+├── AGENTS.md              ← Developer reference (build, test, conventions)
+├── IMPLEMENTATION_PLAN.md ← Work tracking (phases completed, current status)
+└── specs/
+    ├── README.md          ← You are here
+    ├── architecture.md    ← WHAT (behaviors, commands, edge cases)
+    ├── mount-strategy.md  ← HOW (bindfs implementation)
+    ├── clean-command.md   ← HOW (clean logic, volumes)
+    ├── docker-helpers.md  ← HOW (docker wrappers)
+    └── guides/            ← User documentation
+        ├── setup.md
+        ├── failure-recovery.md
+        └── testing.md
 ```
 
-**Principle:** `architecture.md` describes WHAT should happen. `impl/` describes HOW to build it. No duplication.
+**Pattern:** `architecture.md` describes WHAT. Implementation specs describe HOW (referencing behavior, no duplication). Work tracking is in `IMPLEMENTATION_PLAN.md`, not in specs.
