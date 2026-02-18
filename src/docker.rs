@@ -118,15 +118,77 @@ pub fn get_base_image_name(workspace: &std::path::Path) -> Option<String> {
     None
 }
 
+/// Strip JSONC-style `//` and `/* */` comments from content, preserving string literals.
+///
+/// devcontainer.json uses JSONC format which allows comments. This ensures comment
+/// content is not mistaken for real JSON keys or values.
+fn strip_jsonc_comments(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut chars = content.chars().peekable();
+    let mut in_string = false;
+
+    while let Some(c) = chars.next() {
+        if in_string {
+            result.push(c);
+            if c == '\\' {
+                // Escaped character — emit next char as-is (don't end string on `\"`)
+                if let Some(next) = chars.next() {
+                    result.push(next);
+                }
+            } else if c == '"' {
+                in_string = false;
+            }
+        } else {
+            match c {
+                '"' => {
+                    in_string = true;
+                    result.push(c);
+                }
+                '/' => match chars.peek() {
+                    Some('/') => {
+                        // Line comment — skip to end of line, preserve the newline
+                        chars.next();
+                        for c2 in chars.by_ref() {
+                            if c2 == '\n' {
+                                result.push('\n');
+                                break;
+                            }
+                        }
+                    }
+                    Some('*') => {
+                        // Block comment — skip until `*/`, preserve newlines for line numbers
+                        chars.next();
+                        loop {
+                            match chars.next() {
+                                Some('*') if chars.peek() == Some(&'/') => {
+                                    chars.next();
+                                    break;
+                                }
+                                Some('\n') => result.push('\n'),
+                                None => break,
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => result.push(c),
+                },
+                _ => result.push(c),
+            }
+        }
+    }
+    result
+}
+
 /// Extract the top-level `"image"` field value from devcontainer JSON content.
 ///
-/// Searches for the first `"image"` key followed by a string value. This is a
-/// simple scan sufficient for the well-structured devcontainer.json format.
+/// Strips JSONC comments first so that commented-out `"image"` keys are ignored.
+/// Searches for the first `"image"` key followed by a string value.
 fn extract_image_field(content: &str) -> Option<String> {
+    let stripped = strip_jsonc_comments(content);
     let key = "\"image\"";
-    let pos = content.find(key)?;
+    let pos = stripped.find(key)?;
     let after_key =
-        content[pos + key.len()..].trim_start_matches(|c: char| c.is_whitespace() || c == ':');
+        stripped[pos + key.len()..].trim_start_matches(|c: char| c.is_whitespace() || c == ':');
     let after_key = after_key.trim_start();
     if !after_key.starts_with('"') {
         return None;
@@ -450,6 +512,48 @@ mod tests {
         // This documents the known limitation: the value is truncated before the escape.
         let json = r#"{ "image": "my-image:\"tag\"" }"#;
         assert_eq!(extract_image_field(json), Some(r"my-image:\".to_string()));
+    }
+
+    #[test]
+    fn extract_image_field_ignores_line_comment() {
+        let json =
+            "{\n  // \"image\": \"commented-out:image\",\n  \"image\": \"real-image:latest\"\n}";
+        assert_eq!(
+            extract_image_field(json),
+            Some("real-image:latest".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_image_field_ignores_block_comment() {
+        let json = r#"{ /* "image": "block-commented:image", */ "image": "real-image:1.0" }"#;
+        assert_eq!(
+            extract_image_field(json),
+            Some("real-image:1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn strip_jsonc_comments_removes_line_comments() {
+        let input = "{\n  // this is a comment\n  \"key\": \"value\"\n}";
+        let result = strip_jsonc_comments(input);
+        assert!(!result.contains("this is a comment"));
+        assert!(result.contains("\"key\": \"value\""));
+    }
+
+    #[test]
+    fn strip_jsonc_comments_removes_block_comments() {
+        let input = r#"{ /* block comment */ "key": "value" }"#;
+        let result = strip_jsonc_comments(input);
+        assert!(!result.contains("block comment"));
+        assert!(result.contains("\"key\": \"value\""));
+    }
+
+    #[test]
+    fn strip_jsonc_comments_preserves_comment_syntax_in_strings() {
+        let input = r#"{ "key": "http://example.com" }"#;
+        let result = strip_jsonc_comments(input);
+        assert_eq!(result, input);
     }
 
     // --- get_base_image_name ---
