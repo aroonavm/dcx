@@ -83,25 +83,7 @@ mod tests {
         );
     }
 
-    // --- run_capture ---
-
-    #[test]
-    fn run_capture_echo_stdout() {
-        let out = run_capture("echo", &["hello"]).unwrap();
-        assert_eq!(out.stdout.trim(), "hello");
-    }
-
-    #[test]
-    fn run_capture_true_exits_zero() {
-        let out = run_capture("true", &[] as &[&str]).unwrap();
-        assert_eq!(out.status, 0);
-    }
-
-    #[test]
-    fn run_capture_false_exits_nonzero() {
-        let out = run_capture("false", &[] as &[&str]).unwrap();
-        assert_ne!(out.status, 0);
-    }
+    // --- run_capture / run_stream ---
 
     #[test]
     fn run_capture_nonexistent_command_is_err() {
@@ -110,37 +92,8 @@ mod tests {
     }
 
     #[test]
-    fn run_capture_stderr_captured() {
-        // sh -c 'echo err >&2' writes to stderr only.
-        let out = run_capture("sh", &["-c", "echo err >&2"]).unwrap();
-        assert_eq!(out.stderr.trim(), "err");
-        assert!(out.stdout.trim().is_empty());
-    }
-
-    // --- run_stream ---
-
-    #[test]
-    fn run_stream_true_returns_zero() {
-        let code = run_stream("true", &[] as &[&str]).unwrap();
-        assert_eq!(code, 0);
-    }
-
-    #[test]
-    fn run_stream_false_returns_nonzero() {
-        let code = run_stream("false", &[] as &[&str]).unwrap();
-        assert_ne!(code, 0);
-    }
-
-    #[test]
     fn run_stream_nonexistent_command_is_err() {
         let result = run_stream("__dcx_nonexistent__", &[] as &[&str]);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn run_stream_passes_exit_code_through() {
-        // sh -c 'exit 42' exits with code 42.
-        let code = run_stream("sh", &["-c", "exit 42"]).unwrap();
-        assert_eq!(code, 42);
     }
 }

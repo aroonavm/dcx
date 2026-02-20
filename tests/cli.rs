@@ -9,11 +9,6 @@ fn dcx() -> Command {
 // --- --help / --version ---
 
 #[test]
-fn help_exits_zero() {
-    dcx().arg("--help").assert().success();
-}
-
-#[test]
 fn help_lists_all_managed_subcommands() {
     dcx()
         .arg("--help")
@@ -235,6 +230,37 @@ fn exec_no_mount_exits_nonzero_with_message() {
 }
 
 #[test]
+fn exec_multiple_args_are_accepted_by_arg_parser() {
+    // `dcx exec -- cmd arg1 arg2` must not fail due to argument parsing.
+    // The actual exec will fail (no mount / no Docker) but the error must not
+    // be a clap "unexpected argument" error (exit 2).
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    workspace
+        .child(".devcontainer/devcontainer.json")
+        .touch()
+        .unwrap();
+    let out = dcx()
+        .args([
+            "exec",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+            "--",
+            "echo",
+            "hello",
+            "world",
+        ])
+        .output()
+        .unwrap();
+    assert_ne!(
+        out.status.code(),
+        Some(2),
+        "multiple exec args should not cause a clap parse error"
+    );
+}
+
+#[test]
 fn exec_with_nonexistent_config_exits_nonzero() {
     // --config pointing to a missing file must fail (exit 2 if Docker available, 1 if not).
     use assert_fs::TempDir;
@@ -255,6 +281,20 @@ fn exec_with_nonexistent_config_exits_nonzero() {
 // --- dcx down ---
 
 #[test]
+fn down_missing_workspace_exits_nonzero() {
+    // Nonexistent workspace path must fail.
+    // exit 1 if Docker is unavailable; exit 2 if Docker is available (USAGE_ERROR).
+    dcx()
+        .args([
+            "down",
+            "--workspace-folder",
+            "/nonexistent/__dcx_test_path__",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
 fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
     // When Docker is available and no mount exists, "Nothing to do." must appear on stdout.
     // When Docker is unavailable, stderr gets the Docker error (stdout is empty).
@@ -271,6 +311,45 @@ fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
 }
 
 // --- dcx clean ---
+
+#[test]
+fn clean_purge_flag_is_accepted() {
+    // --purge must be a recognised flag, not rejected by clap.
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .args(["clean", "--purge", "--dry-run"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("error: unexpected argument"),
+        "--purge should not be rejected as unknown, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn clean_yes_flag_skips_confirmation() {
+    // --yes alone (without --all) must be accepted and exit cleanly on an empty relay.
+    use assert_fs::TempDir;
+    let home = TempDir::new().unwrap();
+    let out = dcx()
+        .env("HOME", home.path())
+        .args(["clean", "--yes"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("error: unexpected argument"),
+        "--yes should not be rejected as unknown, got stderr: {stderr}"
+    );
+    // Empty relay → success or Docker unavailable
+    assert!(
+        out.status.success() || stderr.contains("Docker is not available"),
+        "Expected clean exit or Docker error, got stderr: {stderr}"
+    );
+}
 
 #[test]
 fn clean_dry_run_empty_relay_exits_success() {
@@ -441,18 +520,10 @@ fn clean_emits_progress_to_stderr() {
 // --- dcx completions ---
 
 #[test]
-fn completions_bash_exits_zero() {
-    dcx().args(["completions", "bash"]).assert().success();
-}
-
-#[test]
-fn completions_zsh_exits_zero() {
-    dcx().args(["completions", "zsh"]).assert().success();
-}
-
-#[test]
-fn completions_fish_exits_zero() {
-    dcx().args(["completions", "fish"]).assert().success();
+fn completions_all_supported_shells_exit_zero() {
+    for shell in ["bash", "zsh", "fish"] {
+        dcx().args(["completions", shell]).assert().success();
+    }
 }
 
 #[test]

@@ -17,18 +17,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_step_starts_with_arrow() {
-        let out = format_step("Resolving workspace path...");
-        assert!(out.starts_with('\u{2192}'), "got: {out}");
-    }
-
-    #[test]
-    fn format_step_contains_message() {
-        let out = format_step("Resolving workspace path...");
-        assert!(out.contains("Resolving workspace path..."), "got: {out}");
-    }
-
-    #[test]
     fn format_step_exact_format() {
         assert_eq!(format_step("test"), "\u{2192} test");
     }

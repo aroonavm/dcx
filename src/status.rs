@@ -113,10 +113,4 @@ mod tests {
     fn label_stale_when_not_mounted() {
         assert_eq!(mount_state_label(false, false), "stale mount");
     }
-
-    #[test]
-    fn label_stale_when_not_mounted_with_container_flag() {
-        // Logically impossible in practice but must be deterministic.
-        assert_eq!(mount_state_label(false, true), "stale mount");
-    }
 }

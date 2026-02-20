@@ -85,6 +85,73 @@ pub fn get_image_id(container_id: &str) -> Result<String, String> {
     Ok(image_id)
 }
 
+/// From a list of repo tags, find the one that represents the runtime (`-uid`) image.
+///
+/// Devcontainer names runtime images with a `-uid` suffix (e.g. `vsc-myproject-hash-uid`).
+pub fn find_uid_tag<'a>(tags: &[&'a str]) -> Option<&'a str> {
+    tags.iter().copied().find(|tag| tag.ends_with("-uid"))
+}
+
+/// Get a reference for the runtime (`-uid`) image of a container.
+///
+/// Prefers the repo tag (e.g. `vsc-myproject-hash-uid`) over the raw SHA256 so that
+/// `docker rmi <tag>` removes only the runtime tag and does not accidentally delete
+/// the build image when both share the same underlying SHA256 (which happens when
+/// devcontainer's UID remapping produces no new layers).
+///
+/// Falls back to the raw image SHA256 if no `-uid` tag is found.
+/// Must be called BEFORE the container is removed.
+pub fn get_runtime_image_ref(container_id: &str) -> Result<String, String> {
+    let image_id = get_image_id(container_id)?;
+
+    let out = cmd::run_capture(
+        "docker",
+        &[
+            "image",
+            "inspect",
+            "--format={{range .RepoTags}}{{.}}\n{{end}}",
+            &image_id,
+        ],
+    )?;
+
+    if out.status == 0 {
+        let tags: Vec<&str> = out
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .collect();
+        if let Some(uid_tag) = find_uid_tag(&tags) {
+            return Ok(uid_tag.to_string());
+        }
+    }
+
+    // No -uid tag found; fall back to the SHA256 (keeps existing behaviour for edge cases)
+    Ok(image_id)
+}
+
+/// Remove the runtime image by reference.
+///
+/// When `image_ref` is a repo tag (e.g. `vsc-name-hash-uid`), removes without
+/// `--force` so that only that tag is removed.  If the build image shares the
+/// same underlying SHA256 and has its own tag, it is preserved.
+///
+/// When `image_ref` is a SHA256 (fallback), uses `--force` for compatibility.
+pub fn remove_runtime_image(image_ref: &str) -> Result<(), String> {
+    let out = if image_ref.starts_with("sha256:") {
+        cmd::run_capture("docker", &["rmi", "--force", image_ref])?
+    } else {
+        cmd::run_capture("docker", &["rmi", image_ref])?
+    };
+    if out.status != 0 {
+        return Err(format!(
+            "Failed to remove runtime image: {}",
+            out.stderr.trim()
+        ));
+    }
+    Ok(())
+}
+
 /// Remove a container image by ID using `docker rmi`.
 ///
 /// Uses `--force` to handle tagged images (e.g. `vsc-dcx-*-uid`) which would
@@ -343,9 +410,21 @@ pub fn clean_orphaned_containers() -> Result<usize, String> {
     Ok(removed)
 }
 
+/// Returns true if `name` is a devcontainer runtime image tag.
+///
+/// Runtime images are named `vsc-*-uid` (the UID-remapped layer devcontainer
+/// creates on top of the build image). Build images (`vsc-*` without the
+/// `-uid` suffix) must NOT be treated as orphans during a normal clean — only
+/// `--purge` removes them.
+pub fn is_runtime_image_tag(name: &str) -> bool {
+    name.starts_with("vsc-") && name.ends_with("-uid")
+}
+
 /// Remove all dcx container images that are not in use.
 ///
-/// This removes both dangling images and named vsc-dcx-* images that have no running/stopped containers.
+/// This removes both dangling images and named vsc-*-uid runtime images that
+/// have no running/stopped containers. Build images (vsc-* without -uid) are
+/// intentionally skipped — they are Docker cache and only removed by --purge.
 /// Returns the count of removed images.
 pub fn clean_orphaned_images() -> Result<usize, String> {
     // First remove dangling images (not used by any container)
@@ -367,7 +446,9 @@ pub fn clean_orphaned_images() -> Result<usize, String> {
         }
     }
 
-    // Also remove vsc-dcx-* images that have no containers
+    // Also remove orphaned vsc-*-uid runtime images (no containers).
+    // Build images (vsc-* without -uid) are intentionally skipped here;
+    // they are only removed by --purge.
     let out = cmd::run_capture(
         "docker",
         &["images", "--format", "{{.Repository}}:{{.Tag}}"],
@@ -375,7 +456,7 @@ pub fn clean_orphaned_images() -> Result<usize, String> {
 
     for image_name in out.stdout.lines() {
         let image_name = image_name.trim();
-        if image_name.is_empty() || !image_name.contains("vsc-dcx-") {
+        if image_name.is_empty() || !is_runtime_image_tag(image_name) {
             continue;
         }
 
@@ -400,8 +481,9 @@ pub fn clean_orphaned_images() -> Result<usize, String> {
             continue;
         }
 
-        // No container uses this image, try to remove it (use --force to remove even if it has tags)
-        if let Ok(out) = cmd::run_capture("docker", &["rmi", "--force", image_name])
+        // No container uses this image; remove by tag (no --force, consistent
+        // with remove_runtime_image which also removes by tag only)
+        if let Ok(out) = cmd::run_capture("docker", &["rmi", image_name])
             && out.status == 0
         {
             removed += 1;
@@ -562,6 +644,71 @@ mod tests {
         let input = r#"{ "key": "http://example.com" }"#;
         let result = strip_jsonc_comments(input);
         assert_eq!(result, input);
+    }
+
+    // --- find_uid_tag ---
+
+    #[test]
+    fn find_uid_tag_returns_uid_tag() {
+        let tags = vec!["vsc-myproject-a1b2c3d4", "vsc-myproject-a1b2c3d4-uid"];
+        assert_eq!(find_uid_tag(&tags), Some("vsc-myproject-a1b2c3d4-uid"));
+    }
+
+    #[test]
+    fn find_uid_tag_returns_none_when_no_uid_tag() {
+        let tags = vec!["vsc-myproject-a1b2c3d4"];
+        assert_eq!(find_uid_tag(&tags), None);
+    }
+
+    #[test]
+    fn find_uid_tag_returns_none_for_empty_list() {
+        assert_eq!(find_uid_tag(&[]), None);
+    }
+
+    #[test]
+    fn find_uid_tag_ignores_tags_containing_uid_in_middle() {
+        // Only suffix match counts
+        let tags = vec!["vsc-myuid-project-a1b2c3d4"];
+        assert_eq!(find_uid_tag(&tags), None);
+    }
+
+    // --- is_runtime_image_tag ---
+
+    #[test]
+    fn is_runtime_image_tag_matches_standard_runtime_image() {
+        assert!(is_runtime_image_tag("vsc-dcx-a1b2c3d4-uid"));
+    }
+
+    #[test]
+    fn is_runtime_image_tag_matches_any_project_name() {
+        assert!(is_runtime_image_tag("vsc-epsilon-kms-a1b2c3d4-uid"));
+    }
+
+    #[test]
+    fn is_runtime_image_tag_rejects_build_image() {
+        // Build image: vsc-* without -uid suffix must NOT match
+        assert!(!is_runtime_image_tag("vsc-dcx-a1b2c3d4"));
+    }
+
+    #[test]
+    fn is_runtime_image_tag_rejects_build_image_any_project() {
+        assert!(!is_runtime_image_tag("vsc-epsilon-kms-a1b2c3d4"));
+    }
+
+    #[test]
+    fn is_runtime_image_tag_rejects_non_vsc_prefix() {
+        assert!(!is_runtime_image_tag("myapp-container-uid"));
+    }
+
+    #[test]
+    fn is_runtime_image_tag_rejects_empty_string() {
+        assert!(!is_runtime_image_tag(""));
+    }
+
+    #[test]
+    fn is_runtime_image_tag_rejects_uid_in_middle() {
+        // "-uid" must be a suffix, not appear in the middle
+        assert!(!is_runtime_image_tag("vsc-uid-project-a1b2c3d4"));
     }
 
     // --- get_base_image_name ---

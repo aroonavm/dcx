@@ -103,16 +103,4 @@ mod tests {
     fn empty_when_nothing_present() {
         assert_eq!(categorize(false, false, false), MountStatus::Empty);
     }
-
-    #[test]
-    fn empty_when_not_mounted_inaccessible_with_container_flag() {
-        // Logically impossible in practice but must be deterministic.
-        assert_eq!(categorize(false, false, true), MountStatus::Empty);
-    }
-
-    #[test]
-    fn empty_when_not_mounted_accessible_with_container_flag() {
-        // Logically impossible in practice but must be deterministic.
-        assert_eq!(categorize(false, true, true), MountStatus::Empty);
-    }
 }

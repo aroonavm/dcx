@@ -120,9 +120,9 @@ fn execute_one(plan: &CleanPlan) -> Result<(String, String), String> {
         docker::remove_container(container_id)?;
     }
 
-    // Remove runtime image if we have its ID
-    if let Some(ref image_id) = plan.runtime_image_id {
-        docker::remove_image(image_id)?;
+    // Remove runtime image if we have its ref
+    if let Some(ref image_ref) = plan.runtime_image_id {
+        docker::remove_runtime_image(image_ref)?;
     }
 
     // Remove base image tag if purge is enabled.
@@ -181,9 +181,9 @@ fn scan_one(mount_point: &Path, purge: bool) -> CleanPlan {
     // Determine state
     let state = categorize_mount_state(mount_point, has_container);
 
-    // Get runtime image ID if container exists
+    // Get runtime image ref if container exists (prefer -uid tag over SHA256)
     let runtime_image_id = if let Some(ref cid) = container_id {
-        docker::get_image_id(cid).ok()
+        docker::get_runtime_image_ref(cid).ok()
     } else {
         None
     };
@@ -269,14 +269,17 @@ fn clean_one(
     // Stop the container (idempotent if not found)
     docker::stop_container(mount_point)?;
 
-    // Remove container if we have its ID. Must get image ID before removing container!
+    // Remove container if we have its ID. Must get image ref before removing container!
     if let Some(id) = container_id {
-        // Get the image ID first (while container still exists for inspection)
-        let image_id = docker::get_image_id(id)?;
+        // Get the runtime image reference BEFORE removing the container.
+        // Prefer the repo tag (e.g. vsc-name-hash-uid) over SHA256 so that
+        // docker rmi only removes the -uid tag and does not accidentally delete
+        // the build image when both share the same underlying SHA256.
+        let image_ref = docker::get_runtime_image_ref(id)?;
         // Then remove the container
         docker::remove_container(id)?;
-        // Finally remove the runtime image (vsc-dcx-*-uid)
-        docker::remove_image(&image_id)?;
+        // Remove the runtime image by tag (no --force) to preserve the build image
+        docker::remove_runtime_image(&image_ref)?;
     }
 
     // Remove base image tag if purge is enabled.

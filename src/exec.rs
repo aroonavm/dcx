@@ -125,38 +125,21 @@ mod tests {
     // --- no_mount_error ---
 
     #[test]
-    fn no_mount_error_contains_workspace_path() {
-        let ws = Path::new("/home/user/myproject");
-        let msg = no_mount_error(ws);
-        assert!(msg.contains("/home/user/myproject"), "got: {msg}");
-    }
-
-    #[test]
-    fn no_mount_error_suggests_dcx_up() {
-        let ws = Path::new("/home/user/myproject");
-        let msg = no_mount_error(ws);
-        assert!(msg.contains("dcx up"), "got: {msg}");
-    }
-
-    #[test]
-    fn no_mount_error_says_no_mount_found() {
+    fn no_mount_error_message() {
         let ws = Path::new("/home/user/myproject");
         let msg = no_mount_error(ws);
         assert!(msg.contains("No mount found"), "got: {msg}");
+        assert!(msg.contains("/home/user/myproject"), "got: {msg}");
+        assert!(msg.contains("dcx up"), "got: {msg}");
     }
 
     // --- stale_mount_error ---
 
     #[test]
-    fn stale_mount_error_suggests_dcx_up_remount() {
-        let msg = stale_mount_error();
-        assert!(msg.contains("dcx up"), "got: {msg}");
-        assert!(msg.contains("remount"), "got: {msg}");
-    }
-
-    #[test]
-    fn stale_mount_error_says_mount_is_stale() {
+    fn stale_mount_error_message() {
         let msg = stale_mount_error();
         assert!(msg.contains("stale"), "got: {msg}");
+        assert!(msg.contains("dcx up"), "got: {msg}");
+        assert!(msg.contains("remount"), "got: {msg}");
     }
 }

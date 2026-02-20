@@ -132,37 +132,20 @@ mod tests {
     // --- nothing_to_do ---
 
     #[test]
-    fn nothing_to_do_contains_workspace_path() {
-        let ws = Path::new("/home/user/myproject");
-        let msg = nothing_to_do(ws);
-        assert!(msg.contains("/home/user/myproject"), "got: {msg}");
-    }
-
-    #[test]
-    fn nothing_to_do_says_nothing_to_do() {
-        let ws = Path::new("/home/user/myproject");
-        let msg = nothing_to_do(ws);
-        assert!(msg.contains("Nothing to do"), "got: {msg}");
-    }
-
-    #[test]
-    fn nothing_to_do_says_no_mount_found() {
+    fn nothing_to_do_message() {
         let ws = Path::new("/home/user/myproject");
         let msg = nothing_to_do(ws);
         assert!(msg.contains("No mount found"), "got: {msg}");
+        assert!(msg.contains("/home/user/myproject"), "got: {msg}");
+        assert!(msg.contains("Nothing to do"), "got: {msg}");
     }
 
     // --- workspace_missing_error ---
 
     #[test]
-    fn workspace_missing_error_mentions_dcx_clean() {
-        let msg = workspace_missing_error();
-        assert!(msg.contains("dcx clean"), "got: {msg}");
-    }
-
-    #[test]
-    fn workspace_missing_error_says_does_not_exist() {
+    fn workspace_missing_error_message() {
         let msg = workspace_missing_error();
         assert!(msg.contains("does not exist"), "got: {msg}");
+        assert!(msg.contains("dcx clean"), "got: {msg}");
     }
 }
