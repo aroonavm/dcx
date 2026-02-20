@@ -31,7 +31,12 @@ pub fn stale_mount_error() -> &'static str {
 /// Run `dcx exec`.
 ///
 /// Returns the exit code that `main` should pass to `std::process::exit`.
-pub fn run_exec(home: &Path, workspace_folder: Option<PathBuf>, command: Vec<String>) -> i32 {
+pub fn run_exec(
+    home: &Path,
+    workspace_folder: Option<PathBuf>,
+    config: Option<PathBuf>,
+    command: Vec<String>,
+) -> i32 {
     // 1. Validate Docker/Colima is available.
     if !docker::is_docker_available() {
         eprintln!("Docker is not available. Is Colima running?");
@@ -50,6 +55,22 @@ pub fn run_exec(home: &Path, workspace_folder: Option<PathBuf>, command: Vec<Str
         "Resolving workspace path: {}",
         workspace.display()
     ));
+
+    // 2b. Resolve --config to an absolute path and validate it exists.
+    let config: Option<PathBuf> = if let Some(p) = config {
+        let abs = if p.is_absolute() {
+            p
+        } else {
+            std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
+        };
+        if !abs.exists() {
+            eprintln!("Config file not found: {}", abs.display());
+            return exit_codes::USAGE_ERROR;
+        }
+        Some(abs)
+    } else {
+        None
+    };
 
     // 3. Recursive mount guard — block nested dcx mounts.
     let relay = relay_dir(home);
@@ -81,8 +102,13 @@ pub fn run_exec(home: &Path, workspace_folder: Option<PathBuf>, command: Vec<Str
     // 6. Rewrite workspace path and delegate to `devcontainer exec`.
     // SIGINT is forwarded naturally to the child (same process group). No special handling needed.
     progress::step("Running exec in container...");
-    let mount_str = mount_point.to_string_lossy();
-    let mut args = vec!["exec", "--workspace-folder", mount_str.as_ref()];
+    let mount_str = mount_point.to_string_lossy().into_owned();
+    let config_str = config.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let mut args = vec!["exec", "--workspace-folder", &mount_str];
+    if let Some(ref s) = config_str {
+        args.push("--config");
+        args.push(s.as_str());
+    }
     if !command.is_empty() {
         args.push("--");
         for c in &command {

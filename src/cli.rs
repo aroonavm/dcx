@@ -23,6 +23,10 @@ pub enum Commands {
         #[arg(long, value_name = "PATH")]
         workspace_folder: Option<PathBuf>,
 
+        /// Path to devcontainer.json config file (default: auto-detected)
+        #[arg(long, value_name = "PATH")]
+        config: Option<PathBuf>,
+
         /// Print what would happen without doing it
         #[arg(long)]
         dry_run: bool,
@@ -37,6 +41,10 @@ pub enum Commands {
         /// Workspace folder path (default: current directory)
         #[arg(long, value_name = "PATH")]
         workspace_folder: Option<PathBuf>,
+
+        /// Path to devcontainer.json config file (default: auto-detected)
+        #[arg(long, value_name = "PATH")]
+        config: Option<PathBuf>,
 
         /// Command and arguments to run inside the container
         #[arg(

@@ -48,24 +48,29 @@ Host /home/user/myproject ──[bindfs]──> Host ~/.colima-mounts/dcx-myproj
 
 **Usage:**
 ```bash
-dcx up [--workspace-folder PATH] [--dry-run] [--yes]
+dcx up [--workspace-folder PATH] [--config PATH] [--dry-run] [--yes]
 ```
+
+**Flags:**
+- `--workspace-folder PATH` — workspace directory (default: current dir)
+- `--config PATH` — explicit path to `devcontainer.json`; skips auto-detection; forwarded to `devcontainer up`
 
 **Behavior:**
 1. Validate Docker available; fail with exit 1 if not
 2. Resolve workspace path; fail exit 2 if missing
-3. Guard against recursive mounts (path starts with `~/.colima-mounts/dcx-`)
-4. Verify devcontainer config exists (`.devcontainer/devcontainer.json` or `.devcontainer.json`)
-5. Compute mount point hash
-6. If `--dry-run`: print plan, exit 0
-7. Auto-create `~/.colima-mounts/` (system defaults)
-8. If mount exists: verify health + source matches (idempotent), else recover from stale
-9. If mount missing: create + mount with `bindfs --no-allow-other`
-10. If workspace not owned by user: warn + prompt (skip with `--yes`)
-11. Rewrite `--workspace-folder` → mount point
-12. Delegate to `devcontainer up`
-13. On failure: rollback (unmount + remove dir), exit 1
-14. On SIGINT: rollback before exit
+3. Resolve `--config` to absolute path; fail exit 2 if provided but not found
+4. Guard against recursive mounts (path starts with `~/.colima-mounts/dcx-`)
+5. Verify devcontainer config exists (`.devcontainer/devcontainer.json` or `.devcontainer.json`); skip if `--config` provided
+6. Compute mount point hash
+7. If `--dry-run`: print plan (including `--config` if provided), exit 0
+8. Auto-create `~/.colima-mounts/` (system defaults)
+9. If mount exists: verify health + source matches (idempotent), else recover from stale
+10. If mount missing: create + mount with `bindfs --no-allow-other`
+11. If workspace not owned by user: warn + prompt (skip with `--yes`)
+12. Rewrite `--workspace-folder` → mount point; forward `--config` if provided
+13. Delegate to `devcontainer up`
+14. On failure: rollback (unmount + remove dir), exit 1
+15. On SIGINT: rollback before exit
 
 ---
 
@@ -73,17 +78,22 @@ dcx up [--workspace-folder PATH] [--dry-run] [--yes]
 
 **Usage:**
 ```bash
-dcx exec [--workspace-folder PATH] COMMAND [ARGS...]
+dcx exec [--workspace-folder PATH] [--config PATH] COMMAND [ARGS...]
 ```
+
+**Flags:**
+- `--workspace-folder PATH` — workspace directory (default: current dir)
+- `--config PATH` — explicit path to `devcontainer.json`; forwarded to `devcontainer exec`
 
 **Behavior:**
 1. Validate Docker available; fail exit 1
 2. Resolve workspace path
-3. Guard: reject `~/.colima-mounts/dcx-*` paths
-4. Verify mount exists + healthy
-5. Rewrite `--workspace-folder`
-6. Delegate to `devcontainer exec`
-7. Forward SIGINT to child process
+3. Resolve `--config` to absolute path; fail exit 2 if provided but not found
+4. Guard: reject `~/.colima-mounts/dcx-*` paths
+5. Verify mount exists + healthy
+6. Rewrite `--workspace-folder`; forward `--config` if provided
+7. Delegate to `devcontainer exec`
+8. Forward SIGINT to child process
 
 ---
 

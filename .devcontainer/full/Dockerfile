@@ -21,6 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   procps \
   sudo \
   bindfs \
+  iptables \
+  ipset \
+  iproute2 \
+  dnsutils \
+  aggregate \
+  jq \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Rust toolchain to a shared location
@@ -57,6 +63,12 @@ RUN ARCH=$(dpkg --print-architecture) && \
   wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+
+# Install firewall script and grant rust user passwordless sudo access to it
+COPY init-firewall.sh /usr/local/bin/init-firewall.sh
+RUN chmod +x /usr/local/bin/init-firewall.sh && \
+  echo "rust ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/rust-firewall && \
+  chmod 0440 /etc/sudoers.d/rust-firewall
 
 # Switch to non-root user
 USER rust

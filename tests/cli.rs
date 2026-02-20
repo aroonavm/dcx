@@ -125,6 +125,58 @@ fn up_recursive_guard_exits_nonzero() {
         .failure();
 }
 
+#[test]
+fn up_with_nonexistent_config_exits_nonzero() {
+    // --config pointing to a missing file must fail (exit 2 if Docker available, 1 if not).
+    use assert_fs::TempDir;
+    let workspace = TempDir::new().unwrap();
+    dcx()
+        .args([
+            "up",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+            "--config",
+            "/nonexistent/__dcx_test_config__.json",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn up_dry_run_with_explicit_config_shows_config_in_plan() {
+    // --config must appear in the dry-run plan output.
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    let config = workspace.child("custom/devcontainer.json");
+    config.touch().unwrap();
+    let out = dcx()
+        .args([
+            "up",
+            "--dry-run",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+            "--config",
+            config.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    if out.status.code() == Some(0) {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("--config"),
+            "dry-run output must contain '--config', got: {stdout}"
+        );
+    } else {
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "expected exit 0 (plan printed) or exit 1 (no Docker), got: {:?}",
+            out.status.code()
+        );
+    }
+}
+
 // --- dcx doctor ---
 
 #[test]
@@ -180,6 +232,24 @@ fn exec_no_mount_exits_nonzero_with_message() {
         stderr.contains("No mount found") || stderr.contains("Docker is not available"),
         "expected 'No mount found' or Docker error on stderr, got: {stderr}"
     );
+}
+
+#[test]
+fn exec_with_nonexistent_config_exits_nonzero() {
+    // --config pointing to a missing file must fail (exit 2 if Docker available, 1 if not).
+    use assert_fs::TempDir;
+    let workspace = TempDir::new().unwrap();
+    dcx()
+        .args([
+            "exec",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+            "--config",
+            "/nonexistent/__dcx_test_config__.json",
+            "true",
+        ])
+        .assert()
+        .failure();
 }
 
 // --- dcx down ---

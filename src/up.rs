@@ -33,10 +33,24 @@ pub fn tilde_path(path: &Path, home: &Path) -> String {
 }
 
 /// Format the `--dry-run` plan message for `dcx up`.
-pub fn dry_run_plan(workspace: &Path, mount_point: &Path, home: &Path) -> String {
+pub fn dry_run_plan(
+    workspace: &Path,
+    mount_point: &Path,
+    home: &Path,
+    config: Option<&Path>,
+) -> String {
     let tilde_mount = tilde_path(mount_point, home);
-    let devcontainer_cmd =
-        cmd::display_cmd("devcontainer", &["up", "--workspace-folder", &tilde_mount]);
+    let mut args = vec![
+        "up".to_string(),
+        "--workspace-folder".to_string(),
+        tilde_mount.clone(),
+    ];
+    if let Some(cfg) = config {
+        args.push("--config".to_string());
+        args.push(cfg.to_string_lossy().into_owned());
+    }
+    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let devcontainer_cmd = cmd::display_cmd("devcontainer", &args_ref);
     format!(
         "Would mount: {} \u{2192} {tilde_mount}\nWould run: {devcontainer_cmd}",
         workspace.display(),
@@ -186,7 +200,13 @@ fn rollback(mount_point: &Path) {
 /// Run `dcx up`.
 ///
 /// Returns the exit code that `main` should pass to `std::process::exit`.
-pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes: bool) -> i32 {
+pub fn run_up(
+    home: &Path,
+    workspace_folder: Option<PathBuf>,
+    config: Option<PathBuf>,
+    dry_run: bool,
+    yes: bool,
+) -> i32 {
     // Install SIGINT handler before any mount operations so Ctrl+C triggers rollback
     // rather than leaving an orphaned mount.
     let interrupted = signals::interrupted_flag();
@@ -210,6 +230,22 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
         workspace.display()
     ));
 
+    // 2b. Resolve --config to an absolute path and validate it exists.
+    let config: Option<PathBuf> = if let Some(p) = config {
+        let abs = if p.is_absolute() {
+            p
+        } else {
+            std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
+        };
+        if !abs.exists() {
+            eprintln!("Config file not found: {}", abs.display());
+            return exit_codes::USAGE_ERROR;
+        }
+        Some(abs)
+    } else {
+        None
+    };
+
     // 3. Recursive mount guard — block nested dcx mounts.
     let relay = relay_dir(home);
     if is_dcx_managed_path(&workspace, &relay) {
@@ -221,7 +257,7 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
     }
 
     // 4. Require a devcontainer configuration.
-    if find_devcontainer_config(&workspace).is_none() {
+    if config.is_none() && find_devcontainer_config(&workspace).is_none() {
         eprintln!(
             "No devcontainer configuration found in {}.",
             workspace.display()
@@ -235,7 +271,10 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
 
     // 6. Dry-run: print plan and exit without side effects.
     if dry_run {
-        println!("{}", dry_run_plan(&workspace, &mount_point, home));
+        println!(
+            "{}",
+            dry_run_plan(&workspace, &mount_point, home, config.as_deref())
+        );
         return exit_codes::SUCCESS;
     }
 
@@ -318,11 +357,14 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
     // If Ctrl+C is pressed during devcontainer up, devcontainer (same process group)
     // is killed, run_stream returns non-zero, and we roll back below.
     progress::step("Starting devcontainer...");
-    let code = cmd::run_stream(
-        "devcontainer",
-        &["up", "--workspace-folder", &mount_point.to_string_lossy()],
-    )
-    .unwrap_or(exit_codes::PREREQ_NOT_FOUND);
+    let mount_str = mount_point.to_string_lossy().into_owned();
+    let config_str = config.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let mut dc_args = vec!["up", "--workspace-folder", &mount_str];
+    if let Some(ref s) = config_str {
+        dc_args.push("--config");
+        dc_args.push(s.as_str());
+    }
+    let code = cmd::run_stream("devcontainer", &dc_args).unwrap_or(exit_codes::PREREQ_NOT_FOUND);
 
     // 11. Roll back on failure (if we mounted this run) and return RUNTIME_ERROR.
     // This handles both normal devcontainer failures and Ctrl+C (SIGINT kills the child,
@@ -339,7 +381,7 @@ pub fn run_up(home: &Path, workspace_folder: Option<PathBuf>, dry_run: bool, yes
     // 12. Tag the base image for later cleanup by `dcx clean --purge`.
     // Non-fatal: if tagging fails (e.g. no "image" field in devcontainer.json),
     // purge will simply skip base image removal for this workspace.
-    if let Some(base_image) = docker::get_base_image_name(&workspace)
+    if let Some(base_image) = docker::get_base_image_name(&workspace, config.as_deref())
         && let Err(e) = docker::tag_base_image(&base_image, &name)
     {
         eprintln!("Warning: Could not tag base image: {e}");
@@ -396,7 +438,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home);
+        let out = dry_run_plan(ws, mp, home, None);
         assert!(out.contains("Would mount:"), "got: {out}");
         assert!(out.contains("/home/user/myproject"), "got: {out}");
         assert!(out.contains("dcx-myproject-a1b2c3d4"), "got: {out}");
@@ -407,7 +449,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home);
+        let out = dry_run_plan(ws, mp, home, None);
         assert!(
             out.contains("~/.colima-mounts/dcx-myproject-a1b2c3d4"),
             "mount path must use tilde abbreviation, got: {out}"
@@ -423,7 +465,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home);
+        let out = dry_run_plan(ws, mp, home, None);
         assert!(out.contains("Would run:"), "got: {out}");
         assert!(
             out.contains("devcontainer up --workspace-folder"),
@@ -437,7 +479,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home);
+        let out = dry_run_plan(ws, mp, home, None);
         let arrow_pos = out
             .find('\u{2192}')
             .expect("→ arrow not found in dry-run output");
@@ -445,6 +487,29 @@ mod tests {
         let mp_pos = out.find("dcx-myproject-a1b2c3d4").unwrap();
         assert!(ws_pos < arrow_pos, "workspace must appear before →");
         assert!(arrow_pos < mp_pos, "→ must appear before mount point");
+    }
+
+    #[test]
+    fn dry_run_plan_includes_config_flag_when_provided() {
+        let home = Path::new("/home/user");
+        let ws = Path::new("/home/user/myproject");
+        let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
+        let cfg = Path::new("/home/user/myproject/.devcontainer/full/devcontainer.json");
+        let out = dry_run_plan(ws, mp, home, Some(cfg));
+        assert!(out.contains("--config"), "got: {out}");
+        assert!(
+            out.contains("/home/user/myproject/.devcontainer/full/devcontainer.json"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn dry_run_plan_no_config_flag_when_absent() {
+        let home = Path::new("/home/user");
+        let ws = Path::new("/home/user/myproject");
+        let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
+        let out = dry_run_plan(ws, mp, home, None);
+        assert!(!out.contains("--config"), "got: {out}");
     }
 
     // --- collision_error ---

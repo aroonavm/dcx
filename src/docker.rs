@@ -98,12 +98,20 @@ pub fn remove_image(image_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Read the build image name from a workspace's devcontainer configuration.
+/// Read the build image name from a devcontainer configuration.
 ///
-/// Checks `.devcontainer/devcontainer.json` then `.devcontainer.json` at the workspace root.
+/// If `config` is `Some`, reads directly from that path. Otherwise checks
+/// `.devcontainer/devcontainer.json` then `.devcontainer.json` at the workspace root.
 /// Extracts the top-level `"image"` field value. Returns `None` if the file is not found,
 /// the field is absent, or parsing fails.
-pub fn get_base_image_name(workspace: &std::path::Path) -> Option<String> {
+pub fn get_base_image_name(
+    workspace: &std::path::Path,
+    config: Option<&std::path::Path>,
+) -> Option<String> {
+    if let Some(path) = config {
+        let content = std::fs::read_to_string(path).ok()?;
+        return extract_image_field(&content);
+    }
     let candidates = [
         workspace.join(".devcontainer").join("devcontainer.json"),
         workspace.join(".devcontainer.json"),
@@ -570,7 +578,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            get_base_image_name(dir.path()),
+            get_base_image_name(dir.path(), None),
             Some("test-image:latest".to_string())
         );
     }
@@ -585,7 +593,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            get_base_image_name(dir.path()),
+            get_base_image_name(dir.path(), None),
             Some("root-image:v2".to_string())
         );
     }
@@ -593,7 +601,7 @@ mod tests {
     #[test]
     fn get_base_image_name_returns_none_when_no_config() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(get_base_image_name(dir.path()), None);
+        assert_eq!(get_base_image_name(dir.path(), None), None);
     }
 
     #[test]
@@ -607,6 +615,40 @@ mod tests {
             r#"{"name":"My Dev","build":{}}"#,
         )
         .unwrap();
-        assert_eq!(get_base_image_name(dir.path()), None);
+        assert_eq!(get_base_image_name(dir.path(), None), None);
+    }
+
+    #[test]
+    fn get_base_image_name_uses_explicit_config_path() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("custom.json");
+        fs::write(&config_path, r#"{"image":"custom-image:v3"}"#).unwrap();
+        assert_eq!(
+            get_base_image_name(dir.path(), Some(&config_path)),
+            Some("custom-image:v3".to_string())
+        );
+    }
+
+    #[test]
+    fn get_base_image_name_explicit_config_ignores_workspace_default() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        // Put one image in the workspace default location...
+        let dc_dir = dir.path().join(".devcontainer");
+        fs::create_dir(&dc_dir).unwrap();
+        fs::write(
+            dc_dir.join("devcontainer.json"),
+            r#"{"image":"workspace-image:latest"}"#,
+        )
+        .unwrap();
+        // ...and a different one in the explicit config.
+        let config_path = dir.path().join("full").join("devcontainer.json");
+        fs::create_dir(dir.path().join("full")).unwrap();
+        fs::write(&config_path, r#"{"image":"full-image:latest"}"#).unwrap();
+        assert_eq!(
+            get_base_image_name(dir.path(), Some(&config_path)),
+            Some("full-image:latest".to_string())
+        );
     }
 }

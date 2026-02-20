@@ -34,16 +34,29 @@ fn main() {
     match cli.command {
         cli::Commands::Up {
             workspace_folder,
+            config,
             dry_run,
             yes,
         } => {
-            std::process::exit(up::run_up(&home_dir(), workspace_folder, dry_run, yes));
+            std::process::exit(up::run_up(
+                &home_dir(),
+                workspace_folder,
+                config,
+                dry_run,
+                yes,
+            ));
         }
         cli::Commands::Exec {
             workspace_folder,
+            config,
             command,
         } => {
-            std::process::exit(exec::run_exec(&home_dir(), workspace_folder, command));
+            std::process::exit(exec::run_exec(
+                &home_dir(),
+                workspace_folder,
+                config,
+                command,
+            ));
         }
         cli::Commands::Down { workspace_folder } => {
             std::process::exit(down::run_down(&home_dir(), workspace_folder));
