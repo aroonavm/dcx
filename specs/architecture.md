@@ -93,9 +93,10 @@ dcx exec [--workspace-folder PATH] [--config PATH] COMMAND [ARGS...]
 3. Resolve `--config` to absolute path; fail exit 2 if provided but not found
 4. Guard: reject `~/.colima-mounts/dcx-*` paths
 5. Verify mount exists + healthy
-6. Rewrite `--workspace-folder`; forward `--config` if provided
-7. Delegate to `devcontainer exec`
-8. Forward SIGINT to child process
+6. Find running container by `devcontainer.local_folder` label on the relay mount point
+7. Delegate to `devcontainer exec` with both `--container-id` (reliable container lookup) and `--workspace-folder` pointing to the relay mount point (so devcontainer reads the config and sets the remote working directory); forward `--config` if provided
+8. The user's shell lands in the `workspaceFolder` inside the container (e.g. `/workspaces/<name>`), not the container's home directory
+9. Forward SIGINT to child process
 
 ---
 

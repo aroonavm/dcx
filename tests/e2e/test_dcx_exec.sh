@@ -58,6 +58,12 @@ rm -rf "$MOUNT_DIR"
 # Remount so subsequent tests can proceed.
 "$DCX" up --workspace-folder "$WS" 2>/dev/null
 
+# --- Working directory is workspace folder ---
+echo "--- working directory ---"
+cwd=$("$DCX" exec --workspace-folder "$WS" pwd 2>/dev/null)
+assert_exit "exec pwd exits 0" 0 $?
+assert_contains "exec starts in workspace folder not home" "$cwd" "/workspaces/"
+
 # --- Progress output on stderr ---
 echo "--- progress output ---"
 stderr_out=$("$DCX" exec --workspace-folder "$WS" true 2>&1 >/dev/null) || true
