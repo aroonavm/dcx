@@ -451,10 +451,32 @@ pub fn is_build_image_tag(name: &str) -> bool {
     repo.starts_with("vsc-") && !repo.ends_with("-uid")
 }
 
+/// Derive the corresponding runtime image name from a build image name.
+///
+/// Build image `vsc-X:tag` → runtime image `vsc-X-uid:tag`
+/// This assumes the build image name is in the format `vsc-*:tag`.
+/// If `name` contains a `:`, appends `-uid` before the tag. Otherwise, appends `-uid` to the name.
+fn build_image_to_runtime_image(build_image: &str) -> String {
+    if let Some(colon_pos) = build_image.find(':') {
+        let repo = &build_image[..colon_pos];
+        let tag = &build_image[colon_pos..];
+        format!("{}-uid{}", repo, tag)
+    } else {
+        format!("{}-uid", build_image)
+    }
+}
+
 /// Remove all devcontainer build images (`vsc-*` without `-uid`) that have no containers.
 ///
 /// Used by `dcx clean --purge --all` as a final sweep to remove orphaned build images
-/// whose containers were already removed. Skips images that still have containers.
+/// whose containers were already removed. Also used by `dcx clean --purge` in single-workspace
+/// mode after cleaning up the specific workspace.
+///
+/// A build image is considered orphaned if:
+/// 1. Its corresponding runtime image (`vsc-*-uid`) no longer exists (workspace fully cleaned), AND
+/// 2. No containers directly reference this build image
+///
+/// Skips images whose runtime image still exists (workspace still active) or that have containers.
 /// Returns the count of removed images.
 pub fn clean_orphaned_build_images() -> Result<usize, String> {
     let out = cmd::run_capture(
@@ -469,7 +491,15 @@ pub fn clean_orphaned_build_images() -> Result<usize, String> {
             continue;
         }
 
-        // Skip if any container (running or stopped) references this image
+        // First check: if the corresponding runtime image still exists, skip this build image.
+        // The runtime image existing means the workspace is still active.
+        let runtime_image = build_image_to_runtime_image(image_name);
+        if image_exists(&runtime_image) {
+            continue;
+        }
+
+        // Second check: if any container (running or stopped) directly references this build image, skip it.
+        // This is a fallback in case containers were created directly from the build image.
         let check_out = match cmd::run_capture(
             "docker",
             &[
@@ -489,6 +519,7 @@ pub fn clean_orphaned_build_images() -> Result<usize, String> {
             continue;
         }
 
+        // Both checks passed: runtime image gone and no containers → safe to remove
         if let Ok(out) = cmd::run_capture("docker", &["rmi", image_name])
             && out.status == 0
         {
@@ -869,6 +900,40 @@ mod tests {
     #[test]
     fn is_build_image_tag_rejects_non_vsc_prefix() {
         assert!(!is_build_image_tag("myapp-a1b2c3d4"));
+    }
+
+    // --- build_image_to_runtime_image ---
+
+    #[test]
+    fn build_image_to_runtime_image_adds_uid_suffix() {
+        assert_eq!(
+            build_image_to_runtime_image("vsc-dcx-a1b2c3d4"),
+            "vsc-dcx-a1b2c3d4-uid"
+        );
+    }
+
+    #[test]
+    fn build_image_to_runtime_image_preserves_tag() {
+        assert_eq!(
+            build_image_to_runtime_image("vsc-dcx-a1b2c3d4:latest"),
+            "vsc-dcx-a1b2c3d4-uid:latest"
+        );
+    }
+
+    #[test]
+    fn build_image_to_runtime_image_handles_complex_names() {
+        assert_eq!(
+            build_image_to_runtime_image("vsc-my-project-xyz-a1b2c3d4:latest"),
+            "vsc-my-project-xyz-a1b2c3d4-uid:latest"
+        );
+    }
+
+    #[test]
+    fn build_image_to_runtime_image_handles_custom_tag() {
+        assert_eq!(
+            build_image_to_runtime_image("vsc-dcx-a1b2c3d4:dev"),
+            "vsc-dcx-a1b2c3d4-uid:dev"
+        );
     }
 
     // --- get_base_image_name ---

@@ -129,6 +129,54 @@ fi
 
 rm -rf "$WS4"
 
+# --- Purge in single-workspace mode doesn't remove other workspace's build image ---
+echo "--- single-workspace purge doesn't affect other workspaces ---"
+WS5=$(make_workspace)
+WS6=$(make_workspace)
+trap 'e2e_cleanup; rm -rf "$WS" "$WS5" "$WS6"' EXIT
+
+# Bring up two workspaces
+"$DCX" up --workspace-folder "$WS5" 2>/dev/null
+"$DCX" up --workspace-folder "$WS6" 2>/dev/null
+
+# Capture both build and runtime images
+ALL_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-")
+BUILD_IMG5=$(echo "$ALL_IMAGES" | grep "^vsc-" | grep -v "\-uid:" | head -1)
+BUILD_IMG6=$(echo "$ALL_IMAGES" | grep "^vsc-" | grep -v "\-uid:" | tail -1)
+
+# Clean WS5 with --purge (single-workspace mode)
+"$DCX" clean --workspace-folder "$WS5" --purge --yes 2>/dev/null
+
+# WS5's build image should be gone
+if [ -n "$BUILD_IMG5" ]; then
+    if docker image inspect "$BUILD_IMG5" > /dev/null 2>&1; then
+        fail "WS5 build image should be removed after clean --purge"
+    else
+        pass "WS5 build image removed by single-workspace clean --purge"
+    fi
+fi
+
+# WS6's build image should still exist (not affected by WS5 cleanup)
+if [ -n "$BUILD_IMG6" ] && [ "$BUILD_IMG5" != "$BUILD_IMG6" ]; then
+    if docker image inspect "$BUILD_IMG6" > /dev/null 2>&1; then
+        pass "WS6 build image preserved after WS5 clean --purge"
+    else
+        fail "WS6 build image was incorrectly removed when cleaning WS5"
+    fi
+fi
+
+# Clean WS6 to verify it still works
+"$DCX" clean --workspace-folder "$WS6" --purge --yes 2>/dev/null
+if [ -n "$BUILD_IMG6" ]; then
+    if docker image inspect "$BUILD_IMG6" > /dev/null 2>&1; then
+        fail "WS6 build image should be removed after clean --purge"
+    else
+        pass "WS6 build image removed by single-workspace clean --purge"
+    fi
+fi
+
+rm -rf "$WS5" "$WS6"
+
 # NOTE: Skipping prompt and failure mode tests - they have environment issues
 # TODO: Fix stdin handling for prompt test
 # TODO: Fix permission/failure mode test
