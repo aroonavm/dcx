@@ -366,7 +366,7 @@ pub fn find_devcontainer_by_workspace(mount_point: &Path) -> Option<String> {
         &["ps", "--filter", &filter, "--format", "{{.ID}}"],
     )
     .ok()?;
-    let id = out.stdout.trim().to_string();
+    let id = out.stdout.lines().next().unwrap_or("").trim().to_string();
     if id.is_empty() { None } else { Some(id) }
 }
 
