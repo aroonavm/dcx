@@ -51,9 +51,10 @@ cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'
 }
 EOF
 "$DCX" up --workspace-folder "$WS3" 2>/dev/null
-MOUNT3=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | tail -1 | xargs basename)
+# Look specifically for the dcx-my-project-* entry (WS may also be mounted alongside it).
+MOUNT3=$(ls -d "${RELAY}"/dcx-my-project-* 2>/dev/null | head -1 | xargs -r basename)
 # The basename of WS3 starts with "my.project." — dot should become hyphen.
-[[ "$MOUNT3" == dcx-my-project* ]] && pass "dots sanitized to hyphens in mount name" || fail "expected dcx-my-project* but got $MOUNT3"
+[[ "$MOUNT3" == dcx-my-project* ]] && pass "dots sanitized to hyphens in mount name" || fail "expected dcx-my-project* but got ${MOUNT3:-<none>}"
 "$DCX" down --workspace-folder "$WS3" 2>/dev/null
 rm -rf "$WS3"
 
@@ -61,15 +62,15 @@ rm -rf "$WS3"
 echo "--- stale mount recovery ---"
 WS4=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS" "$WS4"' EXIT
+# Bring WS down first so only WS4 is in the relay (avoids tail -1 ordering issues).
+"$DCX" down --workspace-folder "$WS" 2>/dev/null || true
 "$DCX" up --workspace-folder "$WS4" 2>/dev/null
-MOUNT_DIR4=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | tail -1)
-# Simulate stale FUSE: unmount manually without removing dir.
-if [ -f /proc/mounts ]; then
-    fusermount -u "$MOUNT_DIR4" 2>/dev/null || true
-else
-    umount "$MOUNT_DIR4" 2>/dev/null || true
-fi
-# Now dcx up should recover (detect stale, remount).
+MOUNT_DIR4=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
+# Simulate stale state: take WS4 down (removes mount + dir), then recreate
+# the empty directory. Models a FUSE mount that died without cleanup.
+"$DCX" down --workspace-folder "$WS4" 2>/dev/null || true
+mkdir -p "$MOUNT_DIR4"
+# Now dcx up should recover (leftover dir, not mounted → remount fresh).
 code=0
 "$DCX" up --workspace-folder "$WS4" 2>/dev/null || code=$?
 assert_exit "up recovers from stale mount" 0 "$code"

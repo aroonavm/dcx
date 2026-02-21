@@ -55,8 +55,8 @@ cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'
 EOF
 
 MOUNT_COUNT_BEFORE=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)
-fail_out=$("$DCX" up --workspace-folder "$WS3" 2>&1) || true
-fail_code=$?
+fail_code=0
+fail_out=$("$DCX" up --workspace-folder "$WS3" 2>&1) || fail_code=$?
 assert_exit "rollback: up exits 1" 1 "$fail_code"
 assert_contains "rollback prints message" "$fail_out" "Mount rolled back."
 MOUNT_COUNT_AFTER2=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)

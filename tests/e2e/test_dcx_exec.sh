@@ -30,8 +30,8 @@ assert_exit "exec passes exit code 42" 42 "$code"
 # --- No mount: fails with correct message ---
 echo "--- no mount error ---"
 WS2=$(make_workspace)
-err=$("$DCX" exec --workspace-folder "$WS2" true 2>&1) || true
-code=$?
+code=0
+err=$("$DCX" exec --workspace-folder "$WS2" true 2>&1) || code=$?
 [ "$code" -ne 0 ] && pass "exec without mount exits non-zero" || fail "exec without mount should fail"
 assert_contains "exec without mount shows error" "$err" "No mount found"
 rm -rf "$WS2"
@@ -45,16 +45,16 @@ code=0
 # --- Stale mount ---
 echo "--- stale mount ---"
 MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
-# Simulate stale FUSE: unmount without removing the directory.
-if [ -f /proc/mounts ]; then
-    fusermount -u "$MOUNT_DIR" 2>/dev/null || true
-else
-    umount "$MOUNT_DIR" 2>/dev/null || true
-fi
+# Simulate stale state: take down the workspace (removes mount + dir), then
+# recreate the empty directory. This models a FUSE mount that died without
+# cleanup — the relay dir exists but is no longer mounted.
+"$DCX" down --workspace-folder "$WS" 2>/dev/null || true
+mkdir -p "$MOUNT_DIR"
 code=0
 err=$("$DCX" exec --workspace-folder "$WS" true 2>&1) || code=$?
 [ "$code" -ne 0 ] && pass "exec with stale mount exits non-zero" || fail "exec with stale mount should fail"
 assert_contains "exec with stale mount shows stale error" "$err" "Mount is stale"
+rm -rf "$MOUNT_DIR"
 # Remount so subsequent tests can proceed.
 "$DCX" up --workspace-folder "$WS" 2>/dev/null
 

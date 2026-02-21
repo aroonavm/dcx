@@ -26,6 +26,19 @@ pub fn stale_mount_error() -> &'static str {
     "Mount is stale. Run `dcx up` to remount."
 }
 
+/// Choose the right error when no active mount is found.
+///
+/// If the relay directory still exists (created by a previous `dcx up`), the mount
+/// became stale (FUSE died, system rebooted, etc.). If the directory is absent,
+/// `dcx up` was never run for this workspace.
+pub fn mount_not_found_error(workspace: &Path, mount_dir_exists: bool) -> String {
+    if mount_dir_exists {
+        stale_mount_error().to_string()
+    } else {
+        no_mount_error(workspace)
+    }
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 /// Run `dcx exec`.
@@ -89,11 +102,12 @@ pub fn run_exec(
     let source_in_table = mount_table::find_mount_source(&table, &mount_point);
 
     if source_in_table.is_none() {
-        eprintln!("{}", no_mount_error(&workspace));
+        // Mount directory existing means dcx up was run before but the mount went away.
+        eprintln!("{}", mount_not_found_error(&workspace, mount_point.exists()));
         return exit_codes::RUNTIME_ERROR;
     }
 
-    // 5. Verify mount is healthy (accessible).
+    // 5. Verify mount is healthy (accessible). In table but not accessible = zombie FUSE.
     if !mount_point.exists() {
         eprintln!("{}", stale_mount_error());
         return exit_codes::RUNTIME_ERROR;
@@ -141,5 +155,23 @@ mod tests {
         assert!(msg.contains("stale"), "got: {msg}");
         assert!(msg.contains("dcx up"), "got: {msg}");
         assert!(msg.contains("remount"), "got: {msg}");
+    }
+
+    // --- mount_not_found_error ---
+
+    #[test]
+    fn mount_not_found_error_stale_when_dir_exists() {
+        // If the relay directory still exists but the mount is gone, it's a stale state
+        let ws = Path::new("/home/user/myproject");
+        let msg = mount_not_found_error(ws, true);
+        assert!(msg.contains("stale"), "got: {msg}");
+    }
+
+    #[test]
+    fn mount_not_found_error_no_mount_when_dir_absent() {
+        // If the relay directory never existed, no mount was ever set up
+        let ws = Path::new("/home/user/myproject");
+        let msg = mount_not_found_error(ws, false);
+        assert!(msg.contains("No mount found"), "got: {msg}");
     }
 }

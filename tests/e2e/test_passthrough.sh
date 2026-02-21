@@ -25,8 +25,8 @@ assert_exit "up --dry-run exits 0" 0 "$code"
 
 # --- Exit codes propagate from devcontainer ---
 echo "--- exit code propagation ---"
-out=$("$DCX" exec --workspace-folder /nonexistent 2>&1) || true
-code=$?
+code=0
+out=$("$DCX" exec --workspace-folder /nonexistent 2>&1) || code=$?
 # Should propagate a non-zero exit code for a bad workspace
 [ "$code" -ne 0 ] && pass "non-zero exit propagated (exit $code)" || fail "expected non-zero exit, got $code"
 
