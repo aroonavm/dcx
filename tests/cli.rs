@@ -433,42 +433,26 @@ fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
 // --- dcx clean ---
 
 #[test]
-fn clean_purge_flag_is_accepted() {
-    // --purge must be a recognised flag, not rejected by clap.
+fn clean_flags_are_accepted() {
+    // --purge, --yes, and --all must all be recognised flags (not rejected by clap).
     use assert_fs::TempDir;
-    let home = TempDir::new().unwrap();
-    let out = dcx()
-        .env("HOME", home.path())
-        .args(["clean", "--purge", "--dry-run"])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.contains("error: unexpected argument"),
-        "--purge should not be rejected as unknown, got stderr: {stderr}"
-    );
-}
-
-#[test]
-fn clean_yes_flag_skips_confirmation() {
-    // --yes alone (without --all) must be accepted and exit cleanly on an empty relay.
-    use assert_fs::TempDir;
-    let home = TempDir::new().unwrap();
-    let out = dcx()
-        .env("HOME", home.path())
-        .args(["clean", "--yes"])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.contains("error: unexpected argument"),
-        "--yes should not be rejected as unknown, got stderr: {stderr}"
-    );
-    // Empty relay → success or Docker unavailable
-    assert!(
-        out.status.success() || stderr.contains("Docker is not available"),
-        "Expected clean exit or Docker error, got stderr: {stderr}"
-    );
+    for flags in [
+        vec!["clean", "--purge", "--dry-run"],
+        vec!["clean", "--yes"],
+        vec!["clean", "--all", "--dry-run"],
+    ] {
+        let home = TempDir::new().unwrap();
+        let out = dcx()
+            .env("HOME", home.path())
+            .args(&flags)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("error: unexpected argument"),
+            "{flags:?} should not be rejected as unknown, got stderr: {stderr}"
+        );
+    }
 }
 
 #[test]

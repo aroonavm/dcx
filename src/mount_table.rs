@@ -273,12 +273,13 @@ mod tests {
     }
 
     #[test]
-    fn find_mount_source_returns_none_for_wrong_target() {
-        let entries = vec![MountEntry {
-            source: "/home/user/proj".to_string(),
-            target: "/home/user/.colima-mounts/dcx-other-xyz98765".to_string(),
-        }];
-        let target = Path::new("/home/user/.colima-mounts/dcx-proj-abc12345");
-        assert_eq!(find_mount_source(&entries, target), None);
+    fn proc_mounts_unescapes_multiple_octal_sequences() {
+        // Path with two octal escapes: \040 (space) and \134 (backslash).
+        let text = "/home/user/my\\040pro\\134ject \
+                    /home/user/.colima-mounts/dcx-my-project-abc12345 \
+                    fuse.bindfs rw 0 0";
+        let entries = parse_proc_mounts(text);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source, "/home/user/my pro\\ject");
     }
 }

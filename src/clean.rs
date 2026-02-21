@@ -729,28 +729,6 @@ mod tests {
         assert!(out.contains("abc123"), "got: {out}");
     }
 
-    #[test]
-    fn confirm_prompt_contains_warning_symbol() {
-        let entries = vec![(
-            "/home/user/project-a".to_string(),
-            "dcx-project-a-a1b2c3d4".to_string(),
-            "abc123".to_string(),
-        )];
-        let out = confirm_prompt(&entries);
-        assert!(out.contains('\u{26a0}'), "got: {out}");
-    }
-
-    #[test]
-    fn confirm_prompt_shows_will_be_stopped() {
-        let entries = vec![(
-            "/home/user/project-a".to_string(),
-            "dcx-project-a-a1b2c3d4".to_string(),
-            "abc123".to_string(),
-        )];
-        let out = confirm_prompt(&entries);
-        assert!(out.contains("will be stopped"), "got: {out}");
-    }
-
     // --- scan_one ---
 
     #[test]

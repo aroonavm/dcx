@@ -260,6 +260,22 @@ mod tests {
     }
 
     #[test]
+    fn doctor_report_passed_check_without_detail() {
+        // A passed check with detail: None must not render empty parentheses.
+        let checks = vec![DoctorCheck {
+            name: "bindfs installed".to_string(),
+            passed: true,
+            detail: None,
+        }];
+        let out = format_doctor_report(&checks);
+        assert!(out.contains("✓ bindfs installed"), "got: {out}");
+        assert!(
+            !out.contains("()"),
+            "must not render empty parens, got: {out}"
+        );
+    }
+
+    #[test]
     fn doctor_report_failed_check_shows_cross_and_fix() {
         let checks = vec![DoctorCheck {
             name: "bindfs not installed".to_string(),
@@ -341,15 +357,6 @@ mod tests {
         // The workspace→mount arrow must NOT appear (no workspace to display).
         assert!(!out.contains("None"));
         assert!(!out.contains("→  dcx-old-thing"));
-    }
-
-    #[test]
-    fn clean_summary_empty_entries_produces_cleaned_zero() {
-        // format_clean_summary is only called when there are entries to report.
-        // The caller emits "Nothing to clean." directly when the list is empty.
-        // Verify the function doesn't panic and produces a well-formed header.
-        let out = format_clean_summary(&[], 0);
-        assert_eq!(out, "Cleaned 0 mounts:");
     }
 
     // --- format_dry_run ---

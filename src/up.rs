@@ -547,39 +547,24 @@ mod tests {
     // --- collision_error ---
 
     #[test]
-    fn collision_error_shows_expected_path() {
+    fn collision_error_contains_all_required_fields() {
         let ws = Path::new("/home/bob/project-bar");
         let out = collision_error(ws, "/home/alice/project-foo", "a1b2c3d4");
-        assert!(out.contains("Expected:"), "got: {out}");
-        assert!(out.contains("/home/bob/project-bar"), "got: {out}");
-    }
-
-    #[test]
-    fn collision_error_shows_found_source() {
-        let ws = Path::new("/home/bob/project-bar");
-        let out = collision_error(ws, "/home/alice/project-foo", "a1b2c3d4");
-        assert!(out.contains("Found:"), "got: {out}");
-        assert!(out.contains("/home/alice/project-foo"), "got: {out}");
-    }
-
-    #[test]
-    fn collision_error_shows_hash() {
-        let ws = Path::new("/home/bob/project-bar");
-        let out = collision_error(ws, "/home/alice/project-foo", "a1b2c3d4");
-        assert!(out.contains("a1b2c3d4"), "got: {out}");
-    }
-
-    #[test]
-    fn collision_error_suggests_dcx_clean() {
-        let ws = Path::new("/home/bob/project-bar");
-        let out = collision_error(ws, "/home/alice/project-foo", "a1b2c3d4");
-        assert!(out.contains("dcx clean"), "got: {out}");
-    }
-
-    #[test]
-    fn collision_error_contains_cross_symbol() {
-        let ws = Path::new("/home/bob/project-bar");
-        let out = collision_error(ws, "/home/alice/project-foo", "a1b2c3d4");
-        assert!(out.contains('\u{2717}'), "got: {out}");
+        assert!(out.contains('\u{2717}'), "missing cross symbol: {out}");
+        assert!(out.contains("Expected:"), "missing Expected label: {out}");
+        assert!(
+            out.contains("/home/bob/project-bar"),
+            "missing workspace: {out}"
+        );
+        assert!(out.contains("Found:"), "missing Found label: {out}");
+        assert!(
+            out.contains("/home/alice/project-foo"),
+            "missing found source: {out}"
+        );
+        assert!(out.contains("a1b2c3d4"), "missing hash: {out}");
+        assert!(
+            out.contains("dcx clean"),
+            "missing dcx clean suggestion: {out}"
+        );
     }
 }

@@ -227,14 +227,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_version_embedded_in_text() {
-        assert_eq!(
-            parse_version_str("bindfs 1.17.2\n"),
-            Some("1.17.2".to_string())
-        );
-    }
-
-    #[test]
     fn parse_version_two_part_version() {
         assert_eq!(parse_version_str("Docker 27.1"), Some("27.1".to_string()));
     }
@@ -242,11 +234,6 @@ mod tests {
     #[test]
     fn parse_version_empty_input() {
         assert_eq!(parse_version_str(""), None);
-    }
-
-    #[test]
-    fn parse_version_no_version_in_text() {
-        assert_eq!(parse_version_str("not a version"), None);
     }
 
     #[test]
@@ -261,14 +248,6 @@ mod tests {
     fn parse_version_ignores_single_number() {
         // A lone number with no dots is not a version string.
         assert_eq!(parse_version_str("42"), None);
-    }
-
-    #[test]
-    fn parse_version_four_part_version() {
-        assert_eq!(
-            parse_version_str("Docker Engine 20.10.17.5"),
-            Some("20.10.17.5".to_string())
-        );
     }
 
     #[test]

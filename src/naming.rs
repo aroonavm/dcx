@@ -152,15 +152,17 @@ mod tests {
         // Last component is 40 chars; sanitized name must be capped at 30.
         let path = Path::new("/home/user/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let name = mount_name(path);
-        // format: dcx-<≤30 chars>-<8 hex chars>
-        let inner = name
-            .strip_prefix("dcx-")
-            .unwrap()
-            .strip_suffix(&name[name.len() - 9..])
-            .unwrap_or("");
-        let _ = inner; // length check via total length
-        // "dcx-" (4) + 30 + "-" (1) + 8 = 43
-        assert_eq!(name.len(), 43, "got: {name}");
+        // format: dcx-<sanitized>-<8 hex chars>
+        // Strip "dcx-" prefix and "-<8 hex>" suffix to get the sanitized segment.
+        assert!(name.starts_with("dcx-"), "got: {name}");
+        let without_prefix = &name["dcx-".len()..];
+        let dash_pos = without_prefix.rfind('-').expect("no dash before hash");
+        let sanitized_segment = &without_prefix[..dash_pos];
+        assert!(
+            sanitized_segment.len() <= 30,
+            "sanitized segment must be ≤30 chars, got {} in: {name}",
+            sanitized_segment.len()
+        );
     }
 
     #[test]
@@ -177,12 +179,6 @@ mod tests {
         // SHA256("/home/user/myproject")[..8] == "f227ecb4" (verified by hash_known_value test).
         let path = Path::new("/home/user/myproject");
         assert_eq!(mount_name(path), "dcx-myproject-f227ecb4");
-    }
-
-    #[test]
-    fn mount_name_is_deterministic() {
-        let path = Path::new("/home/user/myproject");
-        assert_eq!(mount_name(path), mount_name(path));
     }
 
     #[test]

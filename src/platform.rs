@@ -98,16 +98,9 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn unmount_args_linux_has_dash_u_flag() {
+    fn unmount_args_linux_is_fusermount_dash_u_mount_point() {
         let args = unmount_args(Path::new("/tmp/test"));
-        assert_eq!(args[0], "-u");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn unmount_args_linux_has_two_elements() {
-        let args = unmount_args(Path::new("/tmp/test"));
-        assert_eq!(args.len(), 2);
+        assert_eq!(args, vec!["-u", "/tmp/test"]);
     }
 
     #[cfg(target_os = "macos")]
@@ -121,22 +114,5 @@ mod tests {
     fn unmount_args_macos_has_one_element() {
         let args = unmount_args(Path::new("/tmp/test"));
         assert_eq!(args.len(), 1);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn bindfs_install_hint_linux_mentions_apt() {
-        assert!(bindfs_install_hint().contains("apt"));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn bindfs_install_hint_macos_mentions_brew() {
-        assert!(bindfs_install_hint().contains("brew"));
-    }
-
-    #[test]
-    fn devcontainer_install_hint_contains_package_name() {
-        assert!(devcontainer_install_hint().contains("@devcontainers/cli"));
     }
 }

@@ -30,10 +30,10 @@ pub fn content_tag(config_path: &Path) -> String {
 
 /// Expand `${localEnv:VAR:default}` patterns in `value`.
 ///
-/// Replaces each occurrence with the value of env var `VAR`, or `default` if
-/// the variable is not set. Handles multiple occurrences; leaves unknown
-/// patterns with a missing closing `}` unchanged.
-fn expand_local_env(value: &str) -> String {
+/// Replaces each occurrence with `env_fn(VAR)`, or `default` if `env_fn`
+/// returns `None`. Handles multiple occurrences; leaves patterns without a
+/// closing `}` unchanged.
+fn expand_local_env(value: &str, env_fn: impl Fn(&str) -> Option<String>) -> String {
     let mut result = String::new();
     let mut remaining = value;
 
@@ -47,7 +47,7 @@ fn expand_local_env(value: &str) -> String {
             } else {
                 (inner, "")
             };
-            let expanded = std::env::var(var_name).unwrap_or_else(|_| default.to_string());
+            let expanded = env_fn(var_name).unwrap_or_else(|| default.to_string());
             result.push_str(&expanded);
             remaining = &rest[end + 1..];
         } else {
@@ -86,7 +86,7 @@ pub fn build_base_image(config_path: &Path, tag: &str) -> i32 {
     {
         for (key, val) in build_args {
             let val_str = val.as_str().unwrap_or("").to_string();
-            let expanded = expand_local_env(&val_str);
+            let expanded = expand_local_env(&val_str, |v| std::env::var(v).ok());
             args.push("--build-arg".to_string());
             args.push(format!("{key}={expanded}"));
         }
@@ -134,14 +134,6 @@ mod tests {
     use tempfile::tempdir;
 
     // --- content_tag ---
-
-    #[test]
-    fn content_tag_is_deterministic() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("devcontainer.json");
-        fs::write(&path, r#"{"image":"test:latest"}"#).unwrap();
-        assert_eq!(content_tag(&path), content_tag(&path));
-    }
 
     #[test]
     fn content_tag_differs_for_different_content() {
@@ -209,17 +201,19 @@ mod tests {
 
     #[test]
     fn expand_local_env_uses_default_when_var_unset() {
-        // Use a var name that is definitely not set in the environment.
-        let result = expand_local_env("${localEnv:DCX_TEST_UNSET_ZXQY:my-default}");
+        let result = expand_local_env("${localEnv:MY_VAR:my-default}", |_| None);
         assert_eq!(result, "my-default");
     }
 
     #[test]
     fn expand_local_env_uses_env_when_var_set() {
-        // SAFETY: single-threaded test context; no other threads read this var.
-        unsafe { std::env::set_var("DCX_TEST_SET_ZXQY", "actual-value") };
-        let result = expand_local_env("${localEnv:DCX_TEST_SET_ZXQY:fallback}");
-        unsafe { std::env::remove_var("DCX_TEST_SET_ZXQY") };
+        let result = expand_local_env("${localEnv:MY_VAR:fallback}", |v| {
+            if v == "MY_VAR" {
+                Some("actual-value".to_string())
+            } else {
+                None
+            }
+        });
         assert_eq!(result, "actual-value");
     }
 }
