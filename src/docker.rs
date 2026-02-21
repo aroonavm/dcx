@@ -424,6 +424,65 @@ pub fn is_runtime_image_tag(name: &str) -> bool {
     repo.starts_with("vsc-") && repo.ends_with("-uid")
 }
 
+/// Returns true if `name` is a devcontainer build image tag.
+///
+/// Build images are named `vsc-*` without a `-uid` suffix. They are created
+/// by devcontainer as the intermediate build layer and only removed by `--purge`.
+///
+/// Accepts both bare repository names and `repository:tag` strings.
+pub fn is_build_image_tag(name: &str) -> bool {
+    let repo = name.split(':').next().unwrap_or(name);
+    repo.starts_with("vsc-") && !repo.ends_with("-uid")
+}
+
+/// Remove all devcontainer build images (`vsc-*` without `-uid`) that have no containers.
+///
+/// Used by `dcx clean --purge --all` as a final sweep to remove orphaned build images
+/// whose containers were already removed. Skips images that still have containers.
+/// Returns the count of removed images.
+pub fn clean_orphaned_build_images() -> Result<usize, String> {
+    let out = cmd::run_capture(
+        "docker",
+        &["images", "--format", "{{.Repository}}:{{.Tag}}"],
+    )?;
+
+    let mut removed = 0;
+    for image_name in out.stdout.lines() {
+        let image_name = image_name.trim();
+        if image_name.is_empty() || !is_build_image_tag(image_name) {
+            continue;
+        }
+
+        // Skip if any container (running or stopped) references this image
+        let check_out = match cmd::run_capture(
+            "docker",
+            &[
+                "ps",
+                "-a",
+                "--filter",
+                &format!("ancestor={image_name}"),
+                "--format",
+                "{{.ID}}",
+            ],
+        ) {
+            Ok(out) => out,
+            Err(_) => continue,
+        };
+
+        if !check_out.stdout.trim().is_empty() {
+            continue;
+        }
+
+        if let Ok(out) = cmd::run_capture("docker", &["rmi", image_name])
+            && out.status == 0
+        {
+            removed += 1;
+        }
+    }
+
+    Ok(removed)
+}
+
 /// Remove all dcx container images that are not in use.
 ///
 /// This removes both dangling images and named vsc-*-uid runtime images that
@@ -751,6 +810,33 @@ mod tests {
     fn is_runtime_image_tag_rejects_build_image_with_docker_tag_suffix() {
         // Build image with :latest suffix should still be rejected
         assert!(!is_runtime_image_tag("vsc-dcx-a1b2c3d4:latest"));
+    }
+
+    // --- is_build_image_tag ---
+
+    #[test]
+    fn is_build_image_tag_matches_build_image() {
+        assert!(is_build_image_tag("vsc-dcx-a1b2c3d4"));
+    }
+
+    #[test]
+    fn is_build_image_tag_matches_build_image_with_docker_tag_suffix() {
+        assert!(is_build_image_tag("vsc-dcx-a1b2c3d4:latest"));
+    }
+
+    #[test]
+    fn is_build_image_tag_rejects_runtime_image() {
+        assert!(!is_build_image_tag("vsc-dcx-a1b2c3d4-uid"));
+    }
+
+    #[test]
+    fn is_build_image_tag_rejects_runtime_image_with_docker_tag_suffix() {
+        assert!(!is_build_image_tag("vsc-dcx-a1b2c3d4-uid:latest"));
+    }
+
+    #[test]
+    fn is_build_image_tag_rejects_non_vsc_prefix() {
+        assert!(!is_build_image_tag("myapp-a1b2c3d4"));
     }
 
     // --- get_base_image_name ---

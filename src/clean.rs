@@ -656,6 +656,17 @@ pub fn run_clean(
                 }
             }
 
+            progress::step("Cleaning up orphaned build images...");
+            match docker::clean_orphaned_build_images() {
+                Ok(removed) if removed > 0 => {
+                    progress::step(&format!("Removed {removed} build image(s)."));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Warning: Could not clean build images: {e}");
+                }
+            }
+
             progress::step("Cleaning up orphaned volumes...");
             match docker::clean_all_dcx_volumes() {
                 Ok(removed) if removed > 0 => {

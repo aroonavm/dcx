@@ -75,6 +75,12 @@ fn list_volumes(name_filter: &str) -> Result<Vec<String>>
 ```
 List volumes matching a name prefix filter via `docker volume ls --filter name=<filter>`.
 
+### Clean Orphaned Build Images
+```rust
+fn clean_orphaned_build_images() -> Result<usize>
+```
+Remove all `vsc-*` build images (no `-uid` suffix) with no containers. Used by `--all --purge` as a final sweep to catch build images whose containers were already removed externally. Returns count removed. Non-fatal per image.
+
 ### Clean All DCX Volumes
 ```rust
 fn clean_all_dcx_volumes() -> Result<usize>
