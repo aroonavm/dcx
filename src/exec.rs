@@ -102,8 +102,7 @@ pub fn run_exec(
 
     // 6. Find the running container by its devcontainer.local_folder label.
     //    Using --container-id bypasses devcontainer's config-hash-based lookup entirely,
-    //    which would otherwise fail when the workspace config uses build.dockerfile (dcx up
-    //    transforms the config into a temp file, so the hash never matches on exec).
+    //    which is more reliable than relying on devcontainer to resolve the config.
     let container_id = docker::find_devcontainer_by_workspace(&mount_point);
     let Some(container_id) = container_id else {
         eprintln!("No running devcontainer found for this workspace. Run `dcx up` first.");

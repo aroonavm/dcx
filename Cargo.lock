@@ -243,7 +243,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "predicates",
- "serde_json",
  "sha2",
  "signal-hook",
  "tempfile",

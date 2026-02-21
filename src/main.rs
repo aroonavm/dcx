@@ -9,7 +9,6 @@ mod down;
 mod exec;
 mod exit_codes;
 mod format;
-mod image;
 mod mount_table;
 mod naming;
 mod platform;

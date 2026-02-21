@@ -8,7 +8,6 @@ use std::sync::atomic::Ordering;
 use crate::cmd;
 use crate::docker;
 use crate::exit_codes;
-use crate::image;
 use crate::mount_table;
 use crate::naming::{is_dcx_managed_path, mount_name, relay_dir};
 use crate::platform;
@@ -232,7 +231,7 @@ pub fn run_up(
     ));
 
     // 2b. Resolve --config to an absolute path and validate it exists.
-    let mut config: Option<PathBuf> = if let Some(p) = config {
+    let config: Option<PathBuf> = if let Some(p) = config {
         let abs = if p.is_absolute() {
             p
         } else {
@@ -298,38 +297,7 @@ pub fn run_up(
         }
     }
 
-    // 9. If config has build.dockerfile: build/reuse shared base image, write temp config.
-    // The temp dir must outlive the devcontainer invocation below.
-    let mut _temp_config: Option<tempfile::TempDir> = None;
-    if let Some(cfg) = config.as_ref().cloned()
-        && image::has_build_dockerfile(&cfg)
-    {
-        let tag = image::content_tag(&cfg);
-        if !docker::image_exists(&tag) {
-            progress::step(&format!("Building base image {tag} ..."));
-            let code = image::build_base_image(&cfg, &tag);
-            if code != 0 {
-                return exit_codes::RUNTIME_ERROR;
-            }
-        } else {
-            progress::step(&format!("Reusing base image {tag}"));
-        }
-        // Per-workspace alias so `dcx clean --purge` can find the base image.
-        let alias = format!("dcx-base:{}", mount_name(&workspace));
-        let _ = docker::tag_image(&tag, &alias); // non-fatal
-        match image::temp_config_with_image(&cfg, &tag) {
-            Ok(tmp) => {
-                config = Some(tmp.path().join("devcontainer.json"));
-                _temp_config = Some(tmp);
-            }
-            Err(e) => {
-                eprintln!("Failed to create temp config: {e}");
-                return exit_codes::RUNTIME_ERROR;
-            }
-        }
-    }
-
-    // 10. Mount handling: new / idempotent reuse / stale recovery / collision.
+    // 9. Mount handling: new / idempotent reuse / stale recovery / collision.
     let workspace_str = workspace.to_string_lossy();
     let table = platform::read_mount_table().unwrap_or_default();
     let source_in_table = mount_table::find_mount_source(&table, &mount_point).map(str::to_string);
@@ -377,7 +345,7 @@ pub fn run_up(
         true
     };
 
-    // 11. Delegate to `devcontainer up` with rewritten workspace path.
+    // 10. Delegate to `devcontainer up` with rewritten workspace path.
     // Check the interrupted flag before starting devcontainer: if SIGINT arrived
     // in the window between do_mount returning and here, roll back and exit cleanly.
     if interrupted.load(Ordering::Relaxed) {
@@ -398,7 +366,7 @@ pub fn run_up(
     }
     let code = cmd::run_stream("devcontainer", &dc_args).unwrap_or(exit_codes::PREREQ_NOT_FOUND);
 
-    // 12. Roll back on failure (if we mounted this run) and return RUNTIME_ERROR.
+    // 11. Roll back on failure (if we mounted this run) and return RUNTIME_ERROR.
     // This handles both normal devcontainer failures and Ctrl+C (SIGINT kills the child,
     // returning non-zero, which lands here for rollback).
     // The spec requires exit code 1 (not the child's exit code) when dcx up fails
@@ -410,7 +378,7 @@ pub fn run_up(
         return exit_codes::RUNTIME_ERROR;
     }
 
-    // 13. Tag the base image for later cleanup by `dcx clean --purge`.
+    // 12. Tag the base image for later cleanup by `dcx clean --purge`.
     // Non-fatal: if tagging fails (e.g. no "image" field in devcontainer.json),
     // purge will simply skip base image removal for this workspace.
     if let Some(base_image) = docker::get_base_image_name(&workspace, config.as_deref())

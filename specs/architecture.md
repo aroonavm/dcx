@@ -65,21 +65,14 @@ dcx up [--workspace-folder PATH] [--config PATH] [--dry-run] [--yes] [--open]
 6. Compute mount point hash
 7. If `--open`: set `FIREWALL_OPEN=true` in host env before spawning devcontainer
 8. If `--dry-run`: print plan (including `--config` if provided), exit 0
-9. **If `--config` has `build.dockerfile`:** build or reuse shared base image
-   - Hash `devcontainer.json` file content → stable tag `dcx-base:<8-char-hash>`
-   - If image absent: `docker build -t dcx-base:<hash>` using Dockerfile + build args (expands `${localEnv:VAR:default}`)
-   - If image present: emit "Reusing base image dcx-base:<hash>" and skip build
-   - Tag as `dcx-base:<mount-name>` (per-workspace alias for `dcx clean --purge`)
-   - Write temp devcontainer.json with `"image": "dcx-base:<hash>"` replacing `"build": {...}`
-   - Use temp config for all remaining steps
-10. Auto-create `~/.colima-mounts/` (system defaults)
-11. If mount exists: verify health + source matches (idempotent), else recover from stale
-12. If mount missing: create + mount with `bindfs --no-allow-other`
-13. If workspace not owned by user: warn + prompt (skip with `--yes`)
-14. Rewrite `--workspace-folder` → mount point; forward `--config` if provided
-15. Delegate to `devcontainer up`
-16. On failure: rollback (unmount + remove dir), exit 1
-17. On SIGINT: rollback before exit
+9. Auto-create `~/.colima-mounts/` (system defaults)
+10. If mount exists: verify health + source matches (idempotent), else recover from stale
+11. If mount missing: create + mount with `bindfs --no-allow-other`
+12. If workspace not owned by user: warn + prompt (skip with `--yes`)
+13. Rewrite `--workspace-folder` → mount point; forward `--config` if provided
+14. Delegate to `devcontainer up`
+15. On failure: rollback (unmount + remove dir), exit 1
+16. On SIGINT: rollback before exit
 
 ---
 
