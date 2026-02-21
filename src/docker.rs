@@ -416,8 +416,12 @@ pub fn clean_orphaned_containers() -> Result<usize, String> {
 /// creates on top of the build image). Build images (`vsc-*` without the
 /// `-uid` suffix) must NOT be treated as orphans during a normal clean — only
 /// `--purge` removes them.
+///
+/// Accepts both bare repository names (`vsc-foo-uid`) and `repository:tag`
+/// strings as produced by `docker images --format "{{.Repository}}:{{.Tag}}"`.
 pub fn is_runtime_image_tag(name: &str) -> bool {
-    name.starts_with("vsc-") && name.ends_with("-uid")
+    let repo = name.split(':').next().unwrap_or(name);
+    repo.starts_with("vsc-") && repo.ends_with("-uid")
 }
 
 /// Remove all dcx container images that are not in use.
@@ -572,6 +576,22 @@ pub fn get_container_volumes(container_id: &str) -> Result<Vec<String>, String> 
     Ok(volumes)
 }
 
+/// Remove all Docker volumes with the `dcx-` prefix.
+///
+/// Used by `dcx clean --purge --all` as a final sweep to remove any orphaned
+/// dcx-managed volumes whose containers were already removed externally.
+/// Returns the count of removed volumes.
+pub fn clean_all_dcx_volumes() -> Result<usize, String> {
+    let volumes = list_volumes("dcx-")?;
+    let mut removed = 0;
+    for volume in &volumes {
+        if remove_volume(volume).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,6 +738,19 @@ mod tests {
     fn is_runtime_image_tag_rejects_uid_in_middle() {
         // "-uid" must be a suffix, not appear in the middle
         assert!(!is_runtime_image_tag("vsc-uid-project-a1b2c3d4"));
+    }
+
+    #[test]
+    fn is_runtime_image_tag_matches_with_docker_tag_suffix() {
+        // docker images --format "{{.Repository}}:{{.Tag}}" produces "repo:latest"
+        // is_runtime_image_tag must still match when the docker tag (:latest) is appended
+        assert!(is_runtime_image_tag("vsc-dcx-a1b2c3d4-uid:latest"));
+    }
+
+    #[test]
+    fn is_runtime_image_tag_rejects_build_image_with_docker_tag_suffix() {
+        // Build image with :latest suffix should still be rejected
+        assert!(!is_runtime_image_tag("vsc-dcx-a1b2c3d4:latest"));
     }
 
     // --- get_base_image_name ---

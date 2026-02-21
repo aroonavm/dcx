@@ -642,8 +642,8 @@ pub fn run_clean(
             }
         }
 
-        // With --purge, sweep any remaining dcx-base:* tags (catches tags whose
-        // mount dirs were already removed externally).
+        // With --purge, sweep any remaining dcx-base:* tags and dcx-* volumes
+        // (catches resources whose mount dirs were already removed externally).
         if purge {
             progress::step("Cleaning up base image tags...");
             match docker::clean_all_base_image_tags() {
@@ -653,6 +653,17 @@ pub fn run_clean(
                 Ok(_) => {}
                 Err(e) => {
                     eprintln!("Warning: Could not clean base image tags: {e}");
+                }
+            }
+
+            progress::step("Cleaning up orphaned volumes...");
+            match docker::clean_all_dcx_volumes() {
+                Ok(removed) if removed > 0 => {
+                    progress::step(&format!("Removed {removed} dcx volume(s)."));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Warning: Could not clean dcx volumes: {e}");
                 }
             }
         }

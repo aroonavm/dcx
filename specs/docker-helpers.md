@@ -69,6 +69,18 @@ fn remove_volume(name: &str) -> Result<()>
 ```
 Remove Docker volume. Non-fatal on failure — log but don't fail command. Called after container removal when names still known.
 
+### List Volumes
+```rust
+fn list_volumes(name_filter: &str) -> Result<Vec<String>>
+```
+List volumes matching a name prefix filter via `docker volume ls --filter name=<filter>`.
+
+### Clean All DCX Volumes
+```rust
+fn clean_all_dcx_volumes() -> Result<usize>
+```
+Remove all volumes with `dcx-` prefix. Used by `--all --purge` as a final sweep to catch volumes whose containers were already removed externally. Returns count removed. Non-fatal per volume.
+
 ## Error Handling Patterns
 
 **Idempotent operations:**
