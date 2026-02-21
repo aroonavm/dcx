@@ -47,7 +47,7 @@ pub fn mount_not_found_error(workspace: &Path, mount_dir_exists: bool) -> String
 pub fn run_exec(
     home: &Path,
     workspace_folder: Option<PathBuf>,
-    config: Option<PathBuf>,
+    _config: Option<PathBuf>,
     command: Vec<String>,
 ) -> i32 {
     // 1. Validate Docker/Colima is available.
@@ -68,22 +68,6 @@ pub fn run_exec(
         "Resolving workspace path: {}",
         workspace.display()
     ));
-
-    // 2b. Resolve --config to an absolute path and validate it exists.
-    let config: Option<PathBuf> = if let Some(p) = config {
-        let abs = if p.is_absolute() {
-            p
-        } else {
-            std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
-        };
-        if !abs.exists() {
-            eprintln!("Config file not found: {}", abs.display());
-            return exit_codes::USAGE_ERROR;
-        }
-        Some(abs)
-    } else {
-        None
-    };
 
     // 3. Recursive mount guard — block nested dcx mounts.
     let relay = relay_dir(home);
@@ -116,16 +100,20 @@ pub fn run_exec(
         return exit_codes::RUNTIME_ERROR;
     }
 
-    // 6. Rewrite workspace path and delegate to `devcontainer exec`.
+    // 6. Find the running container by its devcontainer.local_folder label.
+    //    Using --container-id bypasses devcontainer's config-hash-based lookup entirely,
+    //    which would otherwise fail when the workspace config uses build.dockerfile (dcx up
+    //    transforms the config into a temp file, so the hash never matches on exec).
+    let container_id = docker::find_devcontainer_by_workspace(&mount_point);
+    let Some(container_id) = container_id else {
+        eprintln!("No running devcontainer found for this workspace. Run `dcx up` first.");
+        return exit_codes::RUNTIME_ERROR;
+    };
+
+    // 7. Delegate to `devcontainer exec`.
     // SIGINT is forwarded naturally to the child (same process group). No special handling needed.
     progress::step("Running exec in container...");
-    let mount_str = mount_point.to_string_lossy().into_owned();
-    let config_str = config.as_ref().map(|p| p.to_string_lossy().into_owned());
-    let mut args = vec!["exec", "--workspace-folder", &mount_str];
-    if let Some(ref s) = config_str {
-        args.push("--config");
-        args.push(s.as_str());
-    }
+    let mut args = vec!["exec", "--container-id", container_id.as_str()];
     if !command.is_empty() {
         args.push("--");
         for c in &command {

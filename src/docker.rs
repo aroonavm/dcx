@@ -354,6 +354,22 @@ pub fn clean_all_base_image_tags() -> Result<usize, String> {
     Ok(removed)
 }
 
+/// Find the running devcontainer for a given relay mount point.
+///
+/// Searches for a running container whose `devcontainer.local_folder` label matches
+/// `mount_point`. Returns the container ID, or `None` if no running container is found.
+pub fn find_devcontainer_by_workspace(mount_point: &Path) -> Option<String> {
+    let mount_str = mount_point.to_string_lossy();
+    let filter = format!("label=devcontainer.local_folder={mount_str}");
+    let out = cmd::run_capture(
+        "docker",
+        &["ps", "--filter", &filter, "--format", "{{.ID}}"],
+    )
+    .ok()?;
+    let id = out.stdout.trim().to_string();
+    if id.is_empty() { None } else { Some(id) }
+}
+
 /// Find all dcx-managed stopped containers and remove them.
 ///
 /// This finds containers with devcontainer labels matching the naming pattern
