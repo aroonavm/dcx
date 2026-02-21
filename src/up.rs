@@ -299,8 +299,8 @@ pub fn run_up(
     }
 
     // 9. If config has build.dockerfile: build/reuse shared base image, write temp config.
-    // The temp file must outlive the devcontainer invocation below.
-    let mut _temp_config: Option<tempfile::NamedTempFile> = None;
+    // The temp dir must outlive the devcontainer invocation below.
+    let mut _temp_config: Option<tempfile::TempDir> = None;
     if let Some(cfg) = config.as_ref().cloned()
         && image::has_build_dockerfile(&cfg)
     {
@@ -319,7 +319,7 @@ pub fn run_up(
         let _ = docker::tag_image(&tag, &alias); // non-fatal
         match image::temp_config_with_image(&cfg, &tag) {
             Ok(tmp) => {
-                config = Some(tmp.path().to_path_buf());
+                config = Some(tmp.path().join("devcontainer.json"));
                 _temp_config = Some(tmp);
             }
             Err(e) => {

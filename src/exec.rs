@@ -103,7 +103,10 @@ pub fn run_exec(
 
     if source_in_table.is_none() {
         // Mount directory existing means dcx up was run before but the mount went away.
-        eprintln!("{}", mount_not_found_error(&workspace, mount_point.exists()));
+        eprintln!(
+            "{}",
+            mount_not_found_error(&workspace, mount_point.exists())
+        );
         return exit_codes::RUNTIME_ERROR;
     }
 

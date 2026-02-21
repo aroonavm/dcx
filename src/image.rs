@@ -100,12 +100,17 @@ pub fn build_base_image(config_path: &Path, tag: &str) -> i32 {
 
 /// Write a temp devcontainer.json replacing `"build":{...}` with `"image":"<name>"`.
 ///
-/// Caller must hold the returned `NamedTempFile` for the lifetime of devcontainer up;
-/// the file is deleted when the temp file is dropped.
+/// The file is written as `devcontainer.json` inside a temp directory because
+/// the `devcontainer` CLI requires the filename to be exactly `devcontainer.json`
+/// or `.devcontainer.json`.
+///
+/// Caller must hold the returned `TempDir` for the lifetime of devcontainer up;
+/// the directory and file are deleted when `TempDir` is dropped.
+/// The config path to pass to devcontainer is `dir.path().join("devcontainer.json")`.
 pub fn temp_config_with_image(
     config_path: &Path,
     image_name: &str,
-) -> Result<tempfile::NamedTempFile, String> {
+) -> Result<tempfile::TempDir, String> {
     let content =
         std::fs::read_to_string(config_path).map_err(|e| format!("Failed to read config: {e}"))?;
     let stripped = strip_jsonc_comments(&content);
@@ -118,13 +123,11 @@ pub fn temp_config_with_image(
     );
     let new_content = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
         .map_err(|e| format!("Failed to serialize config: {e}"))?;
-    let file = tempfile::Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .map_err(|e| format!("Failed to create temp file: {e}"))?;
-    std::fs::write(file.path(), new_content.as_bytes())
+    let dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
+    let file_path = dir.path().join("devcontainer.json");
+    std::fs::write(&file_path, new_content.as_bytes())
         .map_err(|e| format!("Failed to write temp config: {e}"))?;
-    Ok(file)
+    Ok(dir)
 }
 
 #[cfg(test)]
@@ -195,6 +198,41 @@ mod tests {
         let path = dir.path().join("devcontainer.json");
         fs::write(&path, r#"{"name":"test","image":"ubuntu:22.04"}"#).unwrap();
         assert!(!has_build_dockerfile(&path));
+    }
+
+    // --- temp_config_with_image ---
+
+    #[test]
+    fn temp_config_with_image_filename_is_devcontainer_json() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("devcontainer.json");
+        fs::write(
+            &path,
+            r#"{"name":"test","build":{"dockerfile":"Dockerfile"}}"#,
+        )
+        .unwrap();
+        let tmp = temp_config_with_image(&path, "myimage:latest").unwrap();
+        let out_path = tmp.path().join("devcontainer.json");
+        assert!(
+            out_path.exists(),
+            "temp config must be named devcontainer.json, not a random name"
+        );
+    }
+
+    #[test]
+    fn temp_config_with_image_replaces_build_with_image() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("devcontainer.json");
+        fs::write(
+            &path,
+            r#"{"name":"test","build":{"dockerfile":"Dockerfile"}}"#,
+        )
+        .unwrap();
+        let tmp = temp_config_with_image(&path, "myimage:latest").unwrap();
+        let content = fs::read_to_string(tmp.path().join("devcontainer.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["image"], "myimage:latest", "image field must be set");
+        assert!(parsed.get("build").is_none(), "build field must be removed");
     }
 
     // --- expand_local_env ---
