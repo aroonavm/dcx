@@ -26,6 +26,22 @@ dcx exec --workspace-folder . /bin/zsh       # Run command in container
 dcx down                                     # Stop container and cleanup
 ```
 
+```bash
+# Shared dev environment: same devcontainer.json, multiple workspaces
+# First workspace: builds base image once from devcontainer.json
+dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/project-a
+
+# Second workspace: reuses the same base image (instant, no rebuild)
+dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/project-b
+
+# --open controls the firewall per container:
+dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/project-c --open
+# project-c has no network restrictions; project-a and project-b retain theirs.
+
+# The base image is shared: same devcontainer.json content → same image.
+# Changing devcontainer.json (e.g. bumping a package version) triggers a new build.
+```
+
 ## Documentation
 
 - **[Setup Guide](specs/setup.md)** — Installation & configuration

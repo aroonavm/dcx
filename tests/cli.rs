@@ -201,6 +201,97 @@ fn up_dry_run_with_explicit_config_shows_config_in_plan() {
     }
 }
 
+// --- Shared base image (requires Docker) ---
+
+#[test]
+fn up_shared_base_image_reused_across_workspaces() {
+    // Verifies that two `dcx up` invocations with the same --config share one base image.
+    // Guards: if Docker is not available, all assertions are skipped.
+    // Also works in envs with Docker but no bindfs: the base-image step runs before
+    // mounting, so "Building base image" / "Reusing base image" appear in stderr even
+    // if dcx up ultimately fails at the bindfs step.
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    use std::process::Command;
+
+    // Shared config dir with a minimal Dockerfile + devcontainer.json (build.dockerfile).
+    let config_dir = TempDir::new().unwrap();
+    config_dir
+        .child("Dockerfile")
+        .write_str("FROM alpine:3.20\n")
+        .unwrap();
+    let config_path = config_dir.child("devcontainer.json");
+    config_path
+        .write_str(r#"{"name":"dcx-test-shared","build":{"dockerfile":"Dockerfile"}}"#)
+        .unwrap();
+
+    let workspace_a = TempDir::new().unwrap();
+    let workspace_b = TempDir::new().unwrap();
+
+    // Step 1: dcx up for workspace A.
+    let out_a = dcx()
+        .args([
+            "up",
+            "--config",
+            config_path.path().to_str().unwrap(),
+            "--workspace-folder",
+            workspace_a.path().to_str().unwrap(),
+            "--yes",
+        ])
+        .output()
+        .unwrap();
+    let stderr_a = String::from_utf8_lossy(&out_a.stderr);
+
+    // Skip if Docker is not available.
+    if stderr_a.contains("Docker is not available") {
+        return;
+    }
+
+    // The base-image step must have run; either building or reusing.
+    assert!(
+        stderr_a.contains("Building base image") || stderr_a.contains("Reusing base image"),
+        "expected base-image progress in stderr for workspace A, got:\n{stderr_a}"
+    );
+
+    // Step 2: dcx up for workspace B — must reuse (not rebuild) the base image.
+    let out_b = dcx()
+        .args([
+            "up",
+            "--config",
+            config_path.path().to_str().unwrap(),
+            "--workspace-folder",
+            workspace_b.path().to_str().unwrap(),
+            "--yes",
+        ])
+        .output()
+        .unwrap();
+    let stderr_b = String::from_utf8_lossy(&out_b.stderr);
+
+    assert!(
+        stderr_b.contains("Reusing base image"),
+        "second dcx up with same config must reuse base image, got stderr:\n{stderr_b}"
+    );
+    assert!(
+        !stderr_b.contains("Building base image"),
+        "second dcx up must not rebuild the base image, got stderr:\n{stderr_b}"
+    );
+
+    // Cleanup: remove any dcx-base:* images created during this test (non-fatal).
+    let _ = Command::new("docker")
+        .args(["images", "dcx-base", "--format", "{{.Repository}}:{{.Tag}}"])
+        .output()
+        .map(|out| {
+            for tag in String::from_utf8_lossy(&out.stdout).lines() {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    let _ = Command::new("docker")
+                        .args(["rmi", "--force", tag])
+                        .output();
+                }
+            }
+        });
+}
+
 // --- dcx doctor ---
 
 #[test]

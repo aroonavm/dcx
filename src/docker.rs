@@ -197,7 +197,7 @@ pub fn get_base_image_name(
 ///
 /// devcontainer.json uses JSONC format which allows comments. This ensures comment
 /// content is not mistaken for real JSON keys or values.
-fn strip_jsonc_comments(content: &str) -> String {
+pub(crate) fn strip_jsonc_comments(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
     let mut chars = content.chars().peekable();
     let mut in_string = false;
@@ -530,6 +530,15 @@ pub fn remove_volume(name: &str) -> Result<(), String> {
             name,
             out.stderr.trim()
         ));
+    }
+    Ok(())
+}
+
+/// Run `docker tag <src> <dst>`. Non-fatal: returns Err with message on failure.
+pub fn tag_image(src: &str, dst: &str) -> Result<(), String> {
+    let out = cmd::run_capture("docker", &["tag", src, dst])?;
+    if out.status != 0 {
+        return Err(format!("Failed to tag image: {}", out.stderr.trim()));
     }
     Ok(())
 }
