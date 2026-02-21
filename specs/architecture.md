@@ -194,7 +194,7 @@ Devcontainer creates volumes like `dcx-shellhistory-<devcontainerId>`. Only `--p
 
 **Non-user-owned directories:** Warn user with permissions implications. `--yes` skips prompt. Container runs as current user (not root), read/write depends on directory perms.
 
-**Workspace deleted while mounted:** Bindfs mount becomes invalid. Next interaction fails: "Workspace directory does not exist. Use `dcx clean` to remove stale mounts."
+**Workspace deleted while mounted:** Bindfs mount becomes invalid. `dcx up`, `dcx down`, and `dcx exec` fail with: "Workspace directory does not exist. Use `dcx clean` to remove stale mounts." `dcx clean` itself reports "Workspace directory does not exist." without the self-referential hint.
 
 **Colima restart:** Host bindfs mounts survive. VM is recreated, `~/.colima-mounts` re-mounted from host per `colima.yaml`. Containers lost (VM recreated) but `dcx up` recovers: detects healthy mount, reuses it, starts new container.
 

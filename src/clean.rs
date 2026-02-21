@@ -353,25 +353,21 @@ pub fn run_clean(
         let name = mount_name(&workspace);
         let mount_point = relay.join(&name);
 
-        if mount_point.exists() || purge {
-            let plan = scan_one(&mount_point, purge);
-            let dry_run_plan = format::DryRunPlan {
-                mount_name: plan.mount_name,
-                state: plan.state,
-                container_id: plan.container_id,
-                runtime_image_id: plan.runtime_image_id,
-                has_base_image_tag: plan.has_base_image_tag,
-                volumes: plan.volumes,
-                is_mounted: plan.is_mounted,
-            };
-            let output = format::format_dry_run(&[dry_run_plan]);
-            if output.trim().is_empty() {
-                println!("Nothing to clean for {}.", workspace.display());
-            } else {
-                println!("{output}");
-            }
-        } else {
+        let plan = scan_one(&mount_point, purge);
+        let dry_run_plan = format::DryRunPlan {
+            mount_name: plan.mount_name,
+            state: plan.state,
+            container_id: plan.container_id,
+            runtime_image_id: plan.runtime_image_id,
+            has_base_image_tag: plan.has_base_image_tag,
+            volumes: plan.volumes,
+            is_mounted: plan.is_mounted,
+        };
+        let output = format::format_dry_run(&[dry_run_plan]);
+        if output.trim().is_empty() {
             println!("Nothing to clean for {}.", workspace.display());
+        } else {
+            println!("{output}");
         }
         return exit_codes::SUCCESS;
     }
