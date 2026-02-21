@@ -282,4 +282,32 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].source, "/home/user/my pro\\ject");
     }
+
+    // --- unescape_proc_field (direct) ---
+
+    #[test]
+    fn unescape_proc_field_plain_string_unchanged() {
+        assert_eq!(
+            unescape_proc_field("/home/user/project"),
+            "/home/user/project"
+        );
+    }
+
+    #[test]
+    fn unescape_proc_field_decodes_space_escape() {
+        // \040 = 0*64 + 4*8 + 0 = 32 = ASCII space
+        assert_eq!(unescape_proc_field("/my\\040project"), "/my project");
+    }
+
+    #[test]
+    fn unescape_proc_field_trailing_backslash_kept_literal() {
+        // Backslash at end of string: i+3 is not < len, so kept as-is.
+        assert_eq!(unescape_proc_field("path\\"), "path\\");
+    }
+
+    #[test]
+    fn unescape_proc_field_partial_octal_two_digits_kept_literal() {
+        // Only two octal digits after backslash: condition i+3 < len fails.
+        assert_eq!(unescape_proc_field("path\\04"), "path\\04");
+    }
 }

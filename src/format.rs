@@ -238,6 +238,32 @@ mod tests {
         assert!(out.contains("stale mount"));
     }
 
+    #[test]
+    fn status_table_multiple_rows_all_present() {
+        let rows = vec![
+            StatusRow {
+                workspace: Some("/home/user/project-a".to_string()),
+                mount: "dcx-project-a-a1b2c3d4".to_string(),
+                container: Some("abc123".to_string()),
+                state: "running".to_string(),
+            },
+            StatusRow {
+                workspace: Some("/home/user/project-b".to_string()),
+                mount: "dcx-project-b-e5f6g7h8".to_string(),
+                container: None,
+                state: "orphaned".to_string(),
+            },
+        ];
+        let out = format_status_table(&rows);
+        let lines: Vec<&str> = out.lines().collect();
+        // header + 2 data rows = 3 lines
+        assert_eq!(lines.len(), 3, "expected header + 2 data rows, got: {out}");
+        assert!(out.contains("/home/user/project-a"), "got: {out}");
+        assert!(out.contains("/home/user/project-b"), "got: {out}");
+        assert!(out.contains("running"), "got: {out}");
+        assert!(out.contains("orphaned"), "got: {out}");
+    }
+
     // --- format_doctor_report ---
 
     #[test]
@@ -286,6 +312,22 @@ mod tests {
         assert!(!out.contains("All checks passed."), "got: {out}");
         assert!(out.contains("✗ bindfs not installed"), "got: {out}");
         assert!(out.contains("Fix: sudo apt install bindfs"), "got: {out}");
+    }
+
+    #[test]
+    fn doctor_report_failed_check_without_detail_no_fix_line() {
+        // A failed check with detail: None must not render a "Fix:" line.
+        let checks = vec![DoctorCheck {
+            name: "some check".to_string(),
+            passed: false,
+            detail: None,
+        }];
+        let out = format_doctor_report(&checks);
+        assert!(out.contains("✗ some check"), "got: {out}");
+        assert!(
+            !out.contains("Fix:"),
+            "must not show Fix line when detail is None, got: {out}"
+        );
     }
 
     #[test]
@@ -340,6 +382,29 @@ mod tests {
             "got: {out}"
         );
         assert!(out.contains("dcx-project-c-i9j0k1l2"));
+    }
+
+    #[test]
+    fn clean_summary_multiple_entries() {
+        let entries = vec![
+            CleanEntry {
+                workspace: Some("/home/user/project-a".to_string()),
+                mount: "dcx-project-a-a1b2c3d4".to_string(),
+                was: "running".to_string(),
+                action: "stopped, removed".to_string(),
+            },
+            CleanEntry {
+                workspace: None,
+                mount: "dcx-project-b-e5f6g7h8".to_string(),
+                was: "orphaned".to_string(),
+                action: "removed".to_string(),
+            },
+        ];
+        let out = format_clean_summary(&entries, 0);
+        assert!(out.starts_with("Cleaned 2 mounts:"), "got: {out}");
+        assert!(out.contains("/home/user/project-a"), "got: {out}");
+        assert!(out.contains("dcx-project-b-e5f6g7h8"), "got: {out}");
+        assert!(out.contains("stopped, removed"), "got: {out}");
     }
 
     #[test]
@@ -436,6 +501,27 @@ mod tests {
             "should not stop container"
         );
         assert!(out.contains("Unmount bindfs"), "got: {out}");
+    }
+
+    #[test]
+    fn dry_run_unmounted_with_purge_no_unmount_line() {
+        // is_mounted=false + has_base_image_tag=true: shows [purge] line but NOT "Unmount bindfs".
+        let plans = vec![DryRunPlan {
+            mount_name: "dcx-old-e5f6g7h8".to_string(),
+            state: "stale".to_string(),
+            container_id: None,
+            runtime_image_id: None,
+            has_base_image_tag: true,
+            volumes: vec![],
+            is_mounted: false,
+        }];
+        let out = format_dry_run(&plans);
+        assert!(out.contains("[purge]"), "got: {out}");
+        assert!(
+            !out.contains("Unmount bindfs"),
+            "must not show unmount when not mounted, got: {out}"
+        );
+        assert!(out.contains("Remove mount directory"), "got: {out}");
     }
 
     #[test]

@@ -749,6 +749,60 @@ mod tests {
 
     // --- scan_one ---
 
+    // --- scan_relay ---
+
+    #[test]
+    fn scan_relay_nonexistent_dir_returns_empty() {
+        let result = scan_relay(Path::new("/tmp/dcx-test-nonexistent-relay-99999999"));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn scan_relay_filters_dcx_prefix_only() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dcx-project-a1b2c3d4")).unwrap();
+        std::fs::create_dir(dir.path().join("dcx-other-e5f6g7h8")).unwrap();
+        std::fs::create_dir(dir.path().join("not-dcx-dir")).unwrap();
+        std::fs::File::create(dir.path().join("some-file")).unwrap();
+        let result = scan_relay(dir.path());
+        assert_eq!(result.len(), 2, "only dcx- dirs should be included");
+        assert!(
+            result
+                .iter()
+                .all(|p| p.file_name().unwrap().to_string_lossy().starts_with("dcx-"))
+        );
+    }
+
+    #[test]
+    fn scan_relay_returns_sorted_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dcx-z-project-ffffffff")).unwrap();
+        std::fs::create_dir(dir.path().join("dcx-a-project-00000000")).unwrap();
+        let result = scan_relay(dir.path());
+        assert_eq!(result.len(), 2);
+        assert!(result[0] < result[1], "results must be sorted");
+    }
+
+    // --- categorize_mount_state ---
+
+    #[test]
+    fn categorize_mount_state_nonexistent_path_is_empty_dir() {
+        // Neither in mount table nor on filesystem.
+        let state = categorize_mount_state(
+            Path::new("/tmp/dcx-test-nonexistent-categorize-99999999"),
+            false,
+        );
+        assert_eq!(state, "empty dir");
+    }
+
+    #[test]
+    fn categorize_mount_state_existing_unmounted_dir_is_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        // Directory exists on filesystem but is not in the mount table.
+        assert_eq!(categorize_mount_state(dir.path(), false), "empty dir");
+        assert_eq!(categorize_mount_state(dir.path(), true), "empty dir");
+    }
+
     #[test]
     fn scan_one_no_base_image_tag_without_purge() {
         // Without purge, scan_one should not check for base image tags.

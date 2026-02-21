@@ -741,6 +741,31 @@ mod tests {
         assert_eq!(result, input);
     }
 
+    #[test]
+    fn strip_jsonc_comments_handles_unclosed_block_comment() {
+        // An unclosed /* comment reaching EOF must not panic; remaining content is dropped.
+        let input = "before /* unclosed";
+        let result = strip_jsonc_comments(input);
+        assert_eq!(result, "before ");
+    }
+
+    #[test]
+    fn strip_jsonc_comments_handles_unclosed_string() {
+        // An unclosed string reaching EOF: characters are emitted as-is (no comments to strip).
+        let input = r#"{ "key": "no close"#;
+        let result = strip_jsonc_comments(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn strip_jsonc_comments_escaped_quote_does_not_end_string() {
+        // \" inside a string must not close it; the next / should NOT start a comment.
+        let input = r#"{ "key": "val\"//not a comment" }"#;
+        let result = strip_jsonc_comments(input);
+        // The // is inside a string and must survive unchanged.
+        assert!(result.contains("//not a comment"), "got: {result}");
+    }
+
     // --- find_uid_tag ---
 
     #[test]

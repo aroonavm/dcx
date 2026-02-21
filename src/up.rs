@@ -512,6 +512,45 @@ mod tests {
         assert!(!out.contains("--config"), "got: {out}");
     }
 
+    // --- current_username ---
+
+    #[test]
+    fn current_username_returns_env_var_value() {
+        // USER (or USERNAME on Windows) is set in any normal test environment.
+        // The function must return whatever is in the env — not "unknown".
+        let name = current_username();
+        let expected = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "unknown".to_string());
+        assert_eq!(name, expected);
+    }
+
+    #[test]
+    fn current_username_returns_non_empty_string() {
+        // Regardless of the env state, function must return a non-empty string.
+        let name = current_username();
+        assert!(
+            !name.is_empty(),
+            "current_username must not return empty string"
+        );
+    }
+
+    // --- username_for_uid ---
+
+    #[test]
+    fn username_for_uid_returns_root_for_uid_zero() {
+        // UID 0 is always "root" on Linux and macOS.
+        let name = username_for_uid(0);
+        assert_eq!(name, "root", "UID 0 should resolve to 'root'");
+    }
+
+    #[test]
+    fn username_for_uid_returns_fallback_for_unknown_uid() {
+        // UID 4_294_967_294 is highly unlikely to appear in /etc/passwd.
+        let uid = 4_294_967_294u32;
+        assert_eq!(username_for_uid(uid), format!("UID {uid}"));
+    }
+
     // --- collision_error ---
 
     #[test]

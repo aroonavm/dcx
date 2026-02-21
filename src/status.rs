@@ -119,4 +119,38 @@ mod tests {
         // When not mounted, the has_container flag is irrelevant — always "stale mount".
         assert_eq!(mount_state_label(false, true), "stale mount");
     }
+
+    // --- scan_relay ---
+
+    #[test]
+    fn scan_relay_nonexistent_dir_returns_empty() {
+        let result = scan_relay(Path::new("/tmp/dcx-test-status-nonexistent-relay"));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn scan_relay_filters_dcx_prefix_only() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dcx-project-a1b2c3d4")).unwrap();
+        std::fs::create_dir(dir.path().join("not-dcx-dir")).unwrap();
+        let result = scan_relay(dir.path());
+        assert_eq!(result.len(), 1, "only dcx- dirs should be included");
+        assert!(
+            result[0]
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("dcx-")
+        );
+    }
+
+    #[test]
+    fn scan_relay_returns_sorted_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dcx-z-project-ffffffff")).unwrap();
+        std::fs::create_dir(dir.path().join("dcx-a-project-00000000")).unwrap();
+        let result = scan_relay(dir.path());
+        assert_eq!(result.len(), 2);
+        assert!(result[0] < result[1], "results must be sorted");
+    }
 }

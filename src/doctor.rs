@@ -264,4 +264,28 @@ mod tests {
         // so the token is not recognised as a version string.
         assert_eq!(parse_version_str("1.2.0-rc1"), None);
     }
+
+    // --- check_relay_exists ---
+
+    #[test]
+    fn check_relay_exists_passes_when_relay_dir_present() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join(".colima-mounts")).unwrap();
+        let check = check_relay_exists(home.path());
+        assert!(check.passed, "should pass when .colima-mounts exists");
+        assert!(check.detail.is_none(), "no detail expected on success");
+    }
+
+    #[test]
+    fn check_relay_exists_fails_when_relay_dir_absent() {
+        let home = tempfile::tempdir().unwrap();
+        // .colima-mounts is NOT created
+        let check = check_relay_exists(home.path());
+        assert!(!check.passed, "should fail when .colima-mounts is missing");
+        let detail = check.detail.expect("detail should contain a fix hint");
+        assert!(
+            detail.contains("mkdir"),
+            "fix hint should mention mkdir: {detail}"
+        );
+    }
 }
