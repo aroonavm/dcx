@@ -46,7 +46,8 @@
     "containerEnv": {
         "RUST_BACKTRACE": "1",
         "CLAUDE_CONFIG_DIR": "/home/rust/.claude",
-        "POWERLEVEL9K_DISABLE_GITSTATUS": "true"
+        "POWERLEVEL9K_DISABLE_GITSTATUS": "true",
+        "FIREWALL_OPEN": "${localEnv:FIREWALL_OPEN:false}"
     },
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
     "workspaceFolder": "/workspace",

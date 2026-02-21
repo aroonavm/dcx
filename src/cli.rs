@@ -34,6 +34,10 @@ pub enum Commands {
         /// Skip confirmation prompts (e.g. for non-owned directories)
         #[arg(long)]
         yes: bool,
+
+        /// Disable container network firewall (passes FIREWALL_OPEN=true to the container)
+        #[arg(long)]
+        open: bool,
     },
 
     /// Run a command inside the devcontainer

@@ -34,7 +34,7 @@ else
     echo "No Docker DNS rules to restore"
 fi
 
-if [ "$OPEN" = true ]; then
+if [ "${FIREWALL_OPEN:-false}" = "true" ] || [ "$OPEN" = "true" ]; then
     iptables -P INPUT ACCEPT
     iptables -P FORWARD ACCEPT
     iptables -P OUTPUT ACCEPT

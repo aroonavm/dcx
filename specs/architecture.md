@@ -48,12 +48,13 @@ Host /home/user/myproject ──[bindfs]──> Host ~/.colima-mounts/dcx-myproj
 
 **Usage:**
 ```bash
-dcx up [--workspace-folder PATH] [--config PATH] [--dry-run] [--yes]
+dcx up [--workspace-folder PATH] [--config PATH] [--dry-run] [--yes] [--open]
 ```
 
 **Flags:**
 - `--workspace-folder PATH` — workspace directory (default: current dir)
 - `--config PATH` — explicit path to `devcontainer.json`; skips auto-detection; forwarded to `devcontainer up`
+- `--open` — sets `FIREWALL_OPEN=true` in the dcx process environment, which devcontainer forwards into the container via `containerEnv ${localEnv:FIREWALL_OPEN}`; `init-firewall.sh` checks this var and runs with all traffic allowed
 
 **Behavior:**
 1. Validate Docker available; fail with exit 1 if not
@@ -62,15 +63,16 @@ dcx up [--workspace-folder PATH] [--config PATH] [--dry-run] [--yes]
 4. Guard against recursive mounts (path starts with `~/.colima-mounts/dcx-`)
 5. Verify devcontainer config exists (`.devcontainer/devcontainer.json` or `.devcontainer.json`); skip if `--config` provided
 6. Compute mount point hash
-7. If `--dry-run`: print plan (including `--config` if provided), exit 0
-8. Auto-create `~/.colima-mounts/` (system defaults)
-9. If mount exists: verify health + source matches (idempotent), else recover from stale
-10. If mount missing: create + mount with `bindfs --no-allow-other`
-11. If workspace not owned by user: warn + prompt (skip with `--yes`)
-12. Rewrite `--workspace-folder` → mount point; forward `--config` if provided
-13. Delegate to `devcontainer up`
-14. On failure: rollback (unmount + remove dir), exit 1
-15. On SIGINT: rollback before exit
+7. If `--open`: set `FIREWALL_OPEN=true` in host env before spawning devcontainer
+8. If `--dry-run`: print plan (including `--config` if provided), exit 0
+9. Auto-create `~/.colima-mounts/` (system defaults)
+10. If mount exists: verify health + source matches (idempotent), else recover from stale
+11. If mount missing: create + mount with `bindfs --no-allow-other`
+12. If workspace not owned by user: warn + prompt (skip with `--yes`)
+13. Rewrite `--workspace-folder` → mount point; forward `--config` if provided
+14. Delegate to `devcontainer up`
+15. On failure: rollback (unmount + remove dir), exit 1
+16. On SIGINT: rollback before exit
 
 ---
 

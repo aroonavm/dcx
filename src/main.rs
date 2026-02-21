@@ -37,7 +37,14 @@ fn main() {
             config,
             dry_run,
             yes,
+            open,
         } => {
+            if open {
+                // SAFETY: single-threaded at this point; set before spawning devcontainer
+                unsafe {
+                    std::env::set_var("FIREWALL_OPEN", "true");
+                }
+            }
             std::process::exit(up::run_up(
                 &home_dir(),
                 workspace_folder,

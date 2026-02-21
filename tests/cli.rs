@@ -98,6 +98,35 @@ fn up_dry_run_with_valid_workspace_prints_plan() {
 }
 
 #[test]
+fn up_open_flag_is_accepted() {
+    // `dcx up --open --dry-run` must not fail with exit 2 (clap parse error).
+    // It may exit 0 (plan printed) or 1 (Docker unavailable).
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    workspace
+        .child(".devcontainer/devcontainer.json")
+        .touch()
+        .unwrap();
+    let out = dcx()
+        .args([
+            "up",
+            "--open",
+            "--dry-run",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let exit_code = out.status.code();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        exit_code == Some(0) || exit_code == Some(1),
+        "expected exit 0 or 1, got {exit_code:?}; stderr: {stderr}"
+    );
+}
+
+#[test]
 fn up_dry_run_without_devcontainer_config_exits_nonzero() {
     // --dry-run still validates before printing the plan.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.
