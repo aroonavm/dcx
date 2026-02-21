@@ -141,14 +141,15 @@ dcx clean [--workspace-folder PATH] [--all] [--purge] [--dry-run] [--yes]
 8. Cleanup sequence:
    - Stop running container
    - If `--purge` + container: capture volume names BEFORE removal
-   - Remove container + runtime image (`--force`)
-   - If `--purge`: read build image name from devcontainer.json, remove if safe (`docker rmi` without `--force` fails if other images depend on it)
+   - Remove container + runtime image (by repo tag, not `--force`, to avoid removing build image)
+   - If `--purge`: attempt to remove `dcx-base:<mount_name>` tag (alias created during `dcx up` for `"image"` field configs; no-op for `"build"` configs)
    - Remove captured volumes (if any)
    - Unmount bindfs
    - Remove mount directory
 9. Scan for orphaned mounts (mounted but no container): unmount + remove
-10. Clean orphaned `vsc-dcx-*` images (runtime images without containers)
-11. Print summary + exit 0 (or 1 if failures)
+10. Clean orphaned `vsc-*-uid` runtime images (runtime images without containers)
+11. If `--purge`: clean orphaned `vsc-*` build images (no `-uid` suffix) without containers — handles `"build"` configs and the two-step `dcx clean` then `dcx clean --purge` workflow
+12. Print summary + exit 0 (or 1 if failures)
 
 **Behavior (--all mode):**
 - Same, but iterate all `dcx-*` mounts, continue on individual failures

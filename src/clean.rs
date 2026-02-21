@@ -508,6 +508,23 @@ pub fn run_clean(
             }
         }
 
+        // With --purge, also sweep orphaned build images (vsc-* without -uid).
+        // Handles "build.dockerfile" configs where no dcx-base:* tag is created,
+        // and the case where clean was run without --purge first (removing the container
+        // and runtime image), leaving an orphaned build image with no container.
+        if purge {
+            progress::step("Checking for orphaned build images...");
+            match docker::clean_orphaned_build_images() {
+                Ok(removed) if removed > 0 => {
+                    progress::step(&format!("Removed {removed} orphaned build image(s)."));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    errors.push(format!("Warning: Could not clean build images: {e}"));
+                }
+            }
+        }
+
         if cleaned_count == 0 && errors.is_empty() {
             println!("Nothing to clean for {}.", workspace.display());
         } else if errors.is_empty() {

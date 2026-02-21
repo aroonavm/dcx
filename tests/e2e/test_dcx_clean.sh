@@ -94,6 +94,41 @@ fi
 
 rm -rf "$WS3"
 
+# --- Purge removes build image after container cleaned ---
+echo "--- purge removes build image ---"
+WS4=$(make_workspace)
+trap 'e2e_cleanup; rm -rf "$WS" "$WS4"' EXIT
+"$DCX" up --workspace-folder "$WS4" 2>/dev/null
+
+# Capture the build image name (vsc-* without -uid suffix)
+BUILD_IMG=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-" | grep -v "\-uid:" | head -1)
+
+# Clean without --purge first (removes container and runtime image, leaves build image)
+"$DCX" clean --workspace-folder "$WS4" --yes 2>/dev/null
+
+# Build image should still be present (--purge not used yet)
+if [ -n "$BUILD_IMG" ]; then
+    if docker image inspect "$BUILD_IMG" > /dev/null 2>&1; then
+        pass "build image preserved after clean without --purge"
+    else
+        fail "build image unexpectedly removed without --purge"
+    fi
+fi
+
+# Now run clean --purge — should remove the orphaned build image
+"$DCX" clean --workspace-folder "$WS4" --purge --yes 2>/dev/null
+
+# Build image should now be gone
+if [ -n "$BUILD_IMG" ]; then
+    if docker image inspect "$BUILD_IMG" > /dev/null 2>&1; then
+        fail "build image $BUILD_IMG still present after clean --purge"
+    else
+        pass "build image removed by clean --purge"
+    fi
+fi
+
+rm -rf "$WS4"
+
 # NOTE: Skipping prompt and failure mode tests - they have environment issues
 # TODO: Fix stdin handling for prompt test
 # TODO: Fix permission/failure mode test
