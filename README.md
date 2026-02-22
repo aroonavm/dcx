@@ -26,6 +26,17 @@ dcx exec --workspace-folder . /bin/zsh       # Run command in container
 dcx down                                     # Stop container and cleanup
 ```
 
+### Environment Variables
+
+Set `DCX_DEVCONTAINER_CONFIG_PATH` to avoid passing `--config` on every invocation:
+
+```bash
+export DCX_DEVCONTAINER_CONFIG_PATH=~/.dcx/devcontainer.json
+dcx up --workspace-folder ~/project-a       # Uses env var config
+dcx up --workspace-folder ~/project-b       # Uses env var config
+dcx up --workspace-folder ~/project-c --config /other/config.json  # Flag overrides env var
+```
+
 ```bash
 # Shared dev environment: same devcontainer.json, multiple workspaces
 # First workspace: builds base image once from devcontainer.json
