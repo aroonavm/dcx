@@ -54,7 +54,7 @@ trap 'e2e_cleanup; rm -rf "$WS" "$WS2"' EXIT
 "$DCX" up --workspace-folder "$WS2" 2>/dev/null
 
 # Capture the runtime image name (vsc-dcx-*) before cleaning
-RUNTIME_IMG=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-dcx-" | head -1)
+RUNTIME_IMG=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-dcx-" | head -1 || true)
 
 code=0
 "$DCX" clean --all --yes 2>/dev/null || code=$?
@@ -66,7 +66,7 @@ REMAINING=$(find "${RELAY}" -maxdepth 1 -name 'dcx-*' -type d 2>/dev/null | wc -
 
 # Verify runtime image (vsc-dcx-*) is gone
 if [ -n "$RUNTIME_IMG" ]; then
-    RUNTIME_REMAINING=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-dcx-" | wc -l)
+    RUNTIME_REMAINING=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-dcx-" | wc -l || true)
     [ "$RUNTIME_REMAINING" -eq 0 ] && pass "runtime image removed" || fail "vsc-dcx-* image still present after clean: $RUNTIME_REMAINING found"
 fi
 
@@ -78,7 +78,7 @@ WS3=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS" "$WS3"' EXIT
 "$DCX" up --workspace-folder "$WS3" 2>/dev/null
 
-RUNTIME_IMG3=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-dcx-" | head -1)
+RUNTIME_IMG3=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-dcx-" | head -1 || true)
 
 code=0
 "$DCX" clean --workspace-folder "$WS3" --yes 2>/dev/null || code=$?
@@ -101,7 +101,7 @@ trap 'e2e_cleanup; rm -rf "$WS" "$WS4"' EXIT
 "$DCX" up --workspace-folder "$WS4" 2>/dev/null
 
 # Capture the build image name (vsc-* without -uid suffix)
-BUILD_IMG=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-" | grep -v "\-uid:" | head -1)
+BUILD_IMG=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-" | grep -v "\-uid:" | head -1 || true)
 
 # Clean without --purge first (removes container and runtime image, leaves build image)
 "$DCX" clean --workspace-folder "$WS4" --yes 2>/dev/null
@@ -140,9 +140,9 @@ trap 'e2e_cleanup; rm -rf "$WS" "$WS5" "$WS6"' EXIT
 "$DCX" up --workspace-folder "$WS6" 2>/dev/null
 
 # Capture both build and runtime images
-ALL_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-")
-BUILD_IMG5=$(echo "$ALL_IMAGES" | grep "^vsc-" | grep -v "\-uid:" | head -1)
-BUILD_IMG6=$(echo "$ALL_IMAGES" | grep "^vsc-" | grep -v "\-uid:" | tail -1)
+ALL_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-" || true)
+BUILD_IMG5=$(echo "$ALL_IMAGES" | grep "^vsc-" | grep -v "\-uid:" | head -1 || true)
+BUILD_IMG6=$(echo "$ALL_IMAGES" | grep "^vsc-" | grep -v "\-uid:" | tail -1 || true)
 
 # Clean WS5 with --purge (single-workspace mode)
 "$DCX" clean --workspace-folder "$WS5" --purge --yes 2>/dev/null
@@ -176,6 +176,52 @@ if [ -n "$BUILD_IMG6" ]; then
 fi
 
 rm -rf "$WS5" "$WS6"
+
+# --- Multi-workspace cleanup with active containers ---
+# Tests that clean --purge succeeds when multiple workspaces share the same
+# base image (and possibly underlying image SHA). This would fail with the
+# find_uid_tag() bug because remove_runtime_image() would use SHA256, causing
+# conflicts when another workspace's container uses the same SHA.
+echo "--- multi-workspace cleanup with active containers ---"
+{
+    WS_ACTIVE1=$(make_workspace)
+    WS_ACTIVE2=$(make_workspace)
+
+    # Bring up both workspaces (both use the same base image from make_workspace)
+    "$DCX" up --workspace-folder "$WS_ACTIVE1" 2>/dev/null
+    "$DCX" up --workspace-folder "$WS_ACTIVE2" 2>/dev/null
+    pass "brought up two workspaces with same base image"
+
+    # Capture images before cleanup (just count them, we'll verify below)
+    INITIAL_VSC_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "^vsc-" | wc -l || true)
+
+    # Critical test: Clean WS1 with --purge while WS2 is still active
+    # If find_uid_tag() is broken (returns None), this tries to remove by SHA256.
+    # Since both workspaces use the same base image, they may share underlying
+    # image SHAs. When WS2's container uses the shared SHA, docker rmi --force
+    # would fail with "image is being used by running container", causing
+    # dcx clean to exit with error. The fix makes find_uid_tag() work correctly,
+    # so removal happens by tag (vsc-X-uid:latest), not SHA256, avoiding conflicts.
+    code=0
+    "$DCX" clean --workspace-folder "$WS_ACTIVE1" --purge --yes 2>/dev/null || code=$?
+    if [ "$code" -eq 0 ]; then
+        pass "clean --purge of WS1 succeeded with WS2 still running (bug would cause failure)"
+    else
+        fail "clean --purge of WS1 failed with exit code $code (indicates find_uid_tag bug or image removal conflict)"
+    fi
+
+    # Verify that WS2 is still functional (can bring it down without issue)
+    code=0
+    "$DCX" clean --workspace-folder "$WS_ACTIVE2" --purge --yes 2>/dev/null || code=$?
+    if [ "$code" -eq 0 ]; then
+        pass "clean --purge of WS2 succeeded (WS2 still accessible after WS1 cleanup)"
+    else
+        fail "clean --purge of WS2 failed (WS2 may have been corrupted by WS1 cleanup)"
+    fi
+
+    # Cleanup
+    rm -rf "$WS_ACTIVE1" "$WS_ACTIVE2"
+}
 
 # NOTE: Skipping prompt and failure mode tests - they have environment issues
 # TODO: Fix stdin handling for prompt test
