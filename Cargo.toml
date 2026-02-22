@@ -2,6 +2,10 @@
 name = "dcx"
 version = "0.1.0"
 edition = "2024"
+description = "Dynamic workspace mounting wrapper for Colima devcontainers"
+homepage = "https://github.com/aroonavm/dcx"
+repository = "https://github.com/aroonavm/dcx"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -14,3 +18,9 @@ assert_cmd = "2"
 predicates = "3"
 assert_fs = "1"
 tempfile = "3"
+
+[package.metadata.deb]
+section = "utils"
+assets = [
+  ["target/release/dcx", "usr/bin/", "755"],
+]
