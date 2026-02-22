@@ -1,6 +1,6 @@
 [package]
 name = "dcx"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 description = "Dynamic workspace mounting wrapper for Colima devcontainers"
 homepage = "https://github.com/aroonavm/dcx"
