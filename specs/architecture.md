@@ -8,6 +8,19 @@
 
 **Alternatives rejected:** Mount `$HOME` broadly (security risk), `initializeCommand` in devcontainer.json (can't inject relay path into static `workspaceMount`), Docker volumes (no bidirectional host sync).
 
+### Why bindfs over system mounts?
+
+**FUSE** (Filesystem in Userspace) is a kernel module that lets user programs implement custom filesystems without modifying kernel code. **bindfs** is a FUSE tool that creates bind mounts (re-exposing a directory at another path) with custom behavior.
+
+**Why bindfs for dcx:**
+- **No root required** — FUSE runs as the user, so `dcx` doesn't need `sudo` for mount operations (Colima bridges privileges through sshfs)
+- **Dynamic creation/destruction** — Mounts can be created on demand and cleaned up immediately without manual mount table management
+- **Per-user isolation** — `--no-allow-other` restricts access to the current user, preventing container access to other users' projects
+- **Survives host reboot** — FUSE mounts don't survive VM reboot, but `dcx up` re-mounts them automatically
+- **Simpler than standard mounts** — Standard `mount --bind` would require `sudo` and permanent mount table entries, making cleanup harder
+
+Compared to system mounts (e.g., `mount -o bind`), bindfs gives dcx the flexibility to dynamically isolate workspaces without privilege escalation or persistent kernel state.
+
 ---
 
 ## Design {#design}

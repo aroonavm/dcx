@@ -2,6 +2,17 @@
 
 Dynamic workspace mounting wrapper for Colima devcontainers.
 
+## Why dcx?
+
+**Problem:** Colima mounts are static (configured at startup). Running `devcontainer up` requires workspaces to already exist in the VM, but they're dynamic local paths. Mounting `$HOME` broadly exposes all projects to every container — a security risk, especially when running autonomous agents.
+
+**Solution:** `dcx` dynamically mounts only the workspace you need, only while in use. It uses `bindfs` (a FUSE userspace tool) to project your workspace into a pre-mounted relay directory (`~/.colima-mounts`), then starts the devcontainer there.
+
+**Benefits:**
+- **Security:** Only the active workspace is mounted; other projects remain private
+- **Performance:** No need to mount `$HOME` broadly; multiple isolated workspaces can coexist
+- **Convenience:** One command (`dcx up`) handles mount creation, devcontainer startup, and cleanup
+
 ## Installation
 
 ```bash
@@ -10,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/aroonavm/dcx/main/install.sh | sh
 
 Installs to `/usr/local/bin` by default. Override with `DCX_BIN_DIR=~/.local/bin`.
 
-**Prerequisites:** `bindfs`, `devcontainer` CLI, and on macOS: Colima.
+**Prerequisites:** `bindfs`, [`devcontainer` CLI](https://code.visualstudio.com/docs/devcontainers/devcontainer-cli), and [Colima](https://colima.run/).
 
 ## Quick Start
 
