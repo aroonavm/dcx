@@ -46,6 +46,7 @@ fn up_dir_without_devcontainer_config_exits_nonzero() {
     // /tmp exists but has no devcontainer configuration.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.
     dcx()
+        .env_remove("DCX_DEVCONTAINER_CONFIG_PATH")
         .args(["up", "--workspace-folder", "/tmp"])
         .assert()
         .failure();
@@ -131,6 +132,7 @@ fn up_dry_run_without_devcontainer_config_exits_nonzero() {
     // --dry-run still validates before printing the plan.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.
     dcx()
+        .env_remove("DCX_DEVCONTAINER_CONFIG_PATH")
         .args(["up", "--dry-run", "--workspace-folder", "/tmp"])
         .assert()
         .failure();
