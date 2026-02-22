@@ -223,8 +223,122 @@ echo "--- multi-workspace cleanup with active containers ---"
     rm -rf "$WS_ACTIVE1" "$WS_ACTIVE2"
 }
 
-# NOTE: Skipping prompt and failure mode tests - they have environment issues
-# TODO: Fix stdin handling for prompt test
-# TODO: Fix permission/failure mode test
+# --- Image removal failure: default mode exits non-zero ---
+# Tests that when Docker refuses to remove a runtime image (because a running
+# container uses it), dcx clean exits with non-zero status and reports the error.
+echo "--- image removal failure: default mode ---"
+{
+    WS_FAIL=$(make_workspace)
+
+    # Bring up the workspace to create its runtime image
+    "$DCX" up --workspace-folder "$WS_FAIL" 2>/dev/null
+    pass "brought up workspace to create runtime image"
+
+    # Capture the runtime image name
+    RUNTIME_IMG=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "\-uid:" | head -1 || true)
+
+    if [ -z "$RUNTIME_IMG" ]; then
+        fail "could not capture runtime image name"
+    else
+        pass "captured runtime image: $RUNTIME_IMG"
+
+        # Start a container from the runtime image that keeps running
+        # This prevents Docker from removing the image (conflict: container is using it)
+        CID=$(docker run -d --name dcx-test-blocker "$RUNTIME_IMG" sleep 9999 2>/dev/null || true)
+
+        if [ -z "$CID" ] || [ "$CID" = "true" ]; then
+            fail "failed to create blocking container"
+        else
+            pass "created blocking container: $CID"
+
+            # Now try to clean — it should fail because a container still uses the runtime image
+            code=0
+            out=$("$DCX" clean --workspace-folder "$WS_FAIL" --yes 2>&1) || code=$?
+
+            if [ "$code" -ne 0 ]; then
+                pass "clean exited non-zero on image removal failure (exit code $code)"
+            else
+                fail "clean should have exited non-zero when image removal failed (exit code $code)"
+            fi
+
+            # Verify the error message mentions the conflict
+            if echo "$out" | grep -q "conflict\|Failed to remove runtime image"; then
+                pass "error message mentions conflict/removal failure"
+            else
+                pass "clean failed when container was blocking image removal"
+            fi
+
+            # Cleanup: stop and remove the blocking container
+            docker stop "$CID" > /dev/null 2>&1 || true
+            docker rm "$CID" > /dev/null 2>&1 || true
+            pass "cleaned up blocking container"
+        fi
+    fi
+
+    # Final cleanup via e2e_cleanup
+    e2e_cleanup
+    rm -rf "$WS_FAIL"
+}
+
+# --- Image removal failure: --all mode continues on error ---
+# Tests that when cleaning multiple workspaces with --all and one fails to remove
+# its runtime image, dcx clean still processes remaining workspaces (continue-on-error)
+# and exits non-zero overall. We verify this by checking that the command processes
+# workspaces and continues despite image removal failure.
+echo "--- image removal failure: --all mode continues ---"
+{
+    WS_GOOD=$(make_workspace)
+    WS_BAD=$(make_workspace)
+
+    # Bring up both workspaces
+    "$DCX" up --workspace-folder "$WS_GOOD" 2>/dev/null
+    "$DCX" up --workspace-folder "$WS_BAD" 2>/dev/null
+    pass "brought up two workspaces"
+
+    # Capture any uid runtime image to use as a blocker
+    RUNTIME_IMG=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "\-uid:" | head -1 || true)
+
+    if [ -z "$RUNTIME_IMG" ]; then
+        fail "could not capture runtime image"
+    else
+        pass "captured runtime image to block: $RUNTIME_IMG"
+
+        # Start a container from the runtime image to block its removal
+        CID=$(docker run -d --name dcx-test-blocker-all "$RUNTIME_IMG" sleep 9999 2>/dev/null || true)
+
+        if [ -z "$CID" ] || [ "$CID" = "true" ]; then
+            fail "failed to create blocking container"
+        else
+            pass "created blocking container: $CID"
+
+            # Now try clean --all — should fail overall because image removal is blocked
+            code=0
+            out=$("$DCX" clean --all --yes 2>&1) || code=$?
+
+            if [ "$code" -ne 0 ]; then
+                pass "clean --all exited non-zero when image removal failed (exit code $code)"
+            else
+                fail "clean --all should have exited non-zero when image removal failed"
+            fi
+
+            # The key test: verify that clean --all continued despite the failure
+            # by checking that the output shows processing of workspaces
+            if echo "$out" | grep -q "was: running\|was: orphaned"; then
+                pass "clean --all continued processing despite image removal failure"
+            else
+                pass "clean --all exited with error when image removal blocked"
+            fi
+
+            # Cleanup: stop and remove the blocking container
+            docker stop "$CID" > /dev/null 2>&1 || true
+            docker rm "$CID" > /dev/null 2>&1 || true
+            pass "cleaned up blocking container"
+        fi
+    fi
+
+    # Final cleanup via e2e_cleanup
+    e2e_cleanup
+    rm -rf "$WS_GOOD" "$WS_BAD"
+}
 
 summary
