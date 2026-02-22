@@ -201,6 +201,135 @@ fn up_dry_run_with_explicit_config_shows_config_in_plan() {
     }
 }
 
+#[test]
+fn up_dry_run_uses_env_var_config() {
+    // When DCX_DEVCONTAINER_CONFIG_PATH is set and no --config is passed,
+    // the env var path should appear in the dry-run output.
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    let config = workspace.child("custom/devcontainer.json");
+    config.touch().unwrap();
+    let out = dcx()
+        .env(
+            "DCX_DEVCONTAINER_CONFIG_PATH",
+            config.path().to_str().unwrap(),
+        )
+        .args([
+            "up",
+            "--dry-run",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    if out.status.code() == Some(0) {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("--config"),
+            "dry-run output must contain '--config' when env var is set, got: {stdout}"
+        );
+        assert!(
+            stdout.contains(config.path().to_str().unwrap()),
+            "dry-run output must contain the config path from env var, got: {stdout}"
+        );
+    } else {
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "expected exit 0 (plan printed) or exit 1 (no Docker), got: {:?}",
+            out.status.code()
+        );
+    }
+}
+
+#[test]
+fn up_config_flag_overrides_env_var() {
+    // When both DCX_DEVCONTAINER_CONFIG_PATH and --config are provided,
+    // --config must take precedence.
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    let env_config = workspace.child("env/devcontainer.json");
+    env_config.touch().unwrap();
+    let flag_config = workspace.child("flag/devcontainer.json");
+    flag_config.touch().unwrap();
+    let out = dcx()
+        .env(
+            "DCX_DEVCONTAINER_CONFIG_PATH",
+            env_config.path().to_str().unwrap(),
+        )
+        .args([
+            "up",
+            "--dry-run",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+            "--config",
+            flag_config.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    if out.status.code() == Some(0) {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains(flag_config.path().to_str().unwrap()),
+            "dry-run output must contain the --config path (flag), got: {stdout}"
+        );
+        assert!(
+            !stdout.contains(env_config.path().to_str().unwrap()),
+            "dry-run output must not contain the env var path, got: {stdout}"
+        );
+    } else {
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "expected exit 0 (plan printed) or exit 1 (no Docker), got: {:?}",
+            out.status.code()
+        );
+    }
+}
+
+#[test]
+fn up_env_var_config_nonexistent_exits_nonzero() {
+    // When DCX_DEVCONTAINER_CONFIG_PATH points to a nonexistent file and no --config
+    // is provided, the command must fail (exit 2 if Docker available, 1 if not).
+    use assert_fs::TempDir;
+    let workspace = TempDir::new().unwrap();
+    dcx()
+        .env(
+            "DCX_DEVCONTAINER_CONFIG_PATH",
+            "/nonexistent/__dcx_test_env_config__.json",
+        )
+        .args([
+            "up",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn exec_env_var_config_nonexistent_exits_nonzero() {
+    // When DCX_DEVCONTAINER_CONFIG_PATH points to a nonexistent file and no --config
+    // is provided, `dcx exec` must fail (exit 2 if Docker available, 1 if not).
+    use assert_fs::TempDir;
+    let workspace = TempDir::new().unwrap();
+    dcx()
+        .env(
+            "DCX_DEVCONTAINER_CONFIG_PATH",
+            "/nonexistent/__dcx_test_env_config__.json",
+        )
+        .args([
+            "exec",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+            "true",
+        ])
+        .assert()
+        .failure();
+}
+
 // --- dcx doctor ---
 
 #[test]

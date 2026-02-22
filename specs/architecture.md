@@ -53,7 +53,7 @@ dcx up [--workspace-folder PATH] [--config PATH] [--dry-run] [--yes] [--open]
 
 **Flags:**
 - `--workspace-folder PATH` — workspace directory (default: current dir)
-- `--config PATH` — explicit path to `devcontainer.json`; skips auto-detection; forwarded to `devcontainer up`
+- `--config PATH` — explicit path to `devcontainer.json`; skips auto-detection; forwarded to `devcontainer up`. Overridden by `DCX_DEVCONTAINER_CONFIG_PATH` if both are set (flag wins).
 - `--open` — sets `FIREWALL_OPEN=true` in the dcx process environment, which devcontainer forwards into the container via `containerEnv ${localEnv:FIREWALL_OPEN}`; `init-firewall.sh` checks this var and runs with all traffic allowed
 
 **Behavior:**
@@ -85,7 +85,7 @@ dcx exec [--workspace-folder PATH] [--config PATH] COMMAND [ARGS...]
 
 **Flags:**
 - `--workspace-folder PATH` — workspace directory (default: current dir)
-- `--config PATH` — explicit path to `devcontainer.json`; forwarded to `devcontainer exec`
+- `--config PATH` — explicit path to `devcontainer.json`; forwarded to `devcontainer exec`. Overridden by `DCX_DEVCONTAINER_CONFIG_PATH` if both are set (flag wins).
 
 **Behavior:**
 1. Validate Docker available; fail exit 1
@@ -155,6 +155,14 @@ dcx clean [--workspace-folder PATH] [--all] [--purge] [--dry-run] [--yes]
 - Same, but iterate all `dcx-*` mounts, continue on individual failures
 - If `--purge`: after per-mount cleanup, deduplicate + remove all build images, sweep remaining `dcx-*` volumes
 - Print summary count
+
+---
+
+## Environment Variables {#env-vars}
+
+| Variable | Used by | Description |
+|---|---|---|
+| `DCX_DEVCONTAINER_CONFIG_PATH` | `up`, `exec` | Default path to `devcontainer.json`. Overridden by `--config` if both are set. |
 
 ---
 

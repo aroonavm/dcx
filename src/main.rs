@@ -39,6 +39,11 @@ fn main() {
             yes,
             open,
         } => {
+            let config = config.or_else(|| {
+                std::env::var("DCX_DEVCONTAINER_CONFIG_PATH")
+                    .ok()
+                    .map(std::path::PathBuf::from)
+            });
             if open {
                 // SAFETY: single-threaded at this point; set before spawning devcontainer
                 unsafe {
@@ -58,6 +63,11 @@ fn main() {
             config,
             command,
         } => {
+            let config = config.or_else(|| {
+                std::env::var("DCX_DEVCONTAINER_CONFIG_PATH")
+                    .ok()
+                    .map(std::path::PathBuf::from)
+            });
             std::process::exit(exec::run_exec(
                 &home_dir(),
                 workspace_folder,
