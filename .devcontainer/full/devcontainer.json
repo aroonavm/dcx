@@ -51,7 +51,6 @@
     },
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
     "workspaceFolder": "/workspace",
-    // To disable network restrictions, add --open: "sudo /usr/local/bin/init-firewall.sh --open"
-    "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+    "postStartCommand": "sh -c '[ \"$FIREWALL_OPEN\" = true ] && sudo /usr/local/bin/init-firewall.sh --open || sudo /usr/local/bin/init-firewall.sh'",
     "waitFor": "postStartCommand"
 }
