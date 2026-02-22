@@ -66,18 +66,16 @@ Three Dockerfiles are provided for different use cases:
 
 | File | Base | Purpose |
 |------|------|---------|
-| `.devcontainer/Dockerfile` | `rust:slim-bookworm` | Slim dev image (git + bindfs). Default for contributors. |
-| `.devcontainer/Dockerfile.full` | `node:latest` | Full image (Claude Code, zsh, git-delta). For a more complete dev environment. |
+| `.devcontainer/slim/Dockerfile` | `rust:slim-bookworm` | Slim dev image (git + bindfs). Default for contributors. |
+| `.devcontainer/full/Dockerfile` | `node:latest` | Full image (Claude Code, zsh, git-delta). For a more complete dev environment. |
 | `tests/e2e/Dockerfile.test` | `rust:slim-bookworm` | Minimal test image (git + node + devcontainer CLI, no bindfs). |
 
 ```bash
-# Slim image (default) — start with either:
-dcx up --workspace-folder .
-# Or run `devcontainer up --workspace-folder .`
+# Slim image (default) — start with:
+dcx up --workspace-folder . --config .devcontainer/slim/devcontainer.json
 
 # Full image — for the complete dev environment:
-dcx up --workspace-folder . --config .devcontainer/devcontainer.full.json
-# Or run `devcontainer up --workspace-folder . --config .devcontainer/devcontainer.full.json`
+dcx up --workspace-folder . --config .devcontainer/full/devcontainer.json
 ```
 
 ## Building
@@ -97,7 +95,7 @@ The release process builds binaries for all platforms (Linux x86_64/aarch64, mac
 
 1. **Update version** in `Cargo.toml`:
    ```bash
-   # Edit Cargo.toml, change version = "0.1.0" to version = "0.1.1"
+   # Edit Cargo.toml, change version = "0.1.0" to version = "0.1.2"
    ```
 
 2. **Update Cargo.lock** by building:
@@ -108,18 +106,18 @@ The release process builds binaries for all platforms (Linux x86_64/aarch64, mac
 3. **Commit both files**:
    ```bash
    git add Cargo.toml Cargo.lock
-   git commit -m "Bump version to 0.1.1"
+   git commit -m "Bump version to 0.1.2"
    ```
 
 4. **Create a git tag** (tag must match version in Cargo.toml):
    ```bash
-   git tag v0.1.1
+   git tag v0.1.2
    ```
 
 5. **Push commits and tag** (in two steps to avoid race conditions):
    ```bash
    git push origin main
-   git push origin v0.1.1
+   git push origin v0.1.2
    ```
 
 The tag push triggers three workflows:
