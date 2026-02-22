@@ -88,8 +88,13 @@ pub fn get_image_id(container_id: &str) -> Result<String, String> {
 /// From a list of repo tags, find the one that represents the runtime (`-uid`) image.
 ///
 /// Devcontainer names runtime images with a `-uid` suffix (e.g. `vsc-myproject-hash-uid`).
+/// Handles both bare repository names and `repository:tag` strings as produced by
+/// `docker image inspect --format={{range .RepoTags}}{{.}}\n{{end}}`.
 pub fn find_uid_tag<'a>(tags: &[&'a str]) -> Option<&'a str> {
-    tags.iter().copied().find(|tag| tag.ends_with("-uid"))
+    tags.iter().copied().find(|tag| {
+        let repo = tag.split(':').next().unwrap_or(tag);
+        repo.ends_with("-uid")
+    })
 }
 
 /// Get a reference for the runtime (`-uid`) image of a container.
@@ -821,6 +826,27 @@ mod tests {
         // Only suffix match counts
         let tags = vec!["vsc-myuid-project-a1b2c3d4"];
         assert_eq!(find_uid_tag(&tags), None);
+    }
+
+    #[test]
+    fn find_uid_tag_matches_full_docker_tag_format() {
+        // docker image inspect --format={{range .RepoTags}}{{.}}\n{{end}} produces "repo:tag" strings
+        let tags = vec!["vsc-foo-a1b2c3d4-uid:latest"];
+        assert_eq!(find_uid_tag(&tags), Some("vsc-foo-a1b2c3d4-uid:latest"));
+    }
+
+    #[test]
+    fn find_uid_tag_rejects_build_image_with_tag_suffix() {
+        // Build image with :tag suffix should be rejected (no -uid in repo name)
+        let tags = vec!["vsc-foo-a1b2c3d4:latest"];
+        assert_eq!(find_uid_tag(&tags), None);
+    }
+
+    #[test]
+    fn find_uid_tag_matches_non_latest_tag() {
+        // Should work with any docker tag, not just :latest
+        let tags = vec!["vsc-foo-a1b2c3d4-uid:20240101"];
+        assert_eq!(find_uid_tag(&tags), Some("vsc-foo-a1b2c3d4-uid:20240101"));
     }
 
     // --- is_runtime_image_tag ---
