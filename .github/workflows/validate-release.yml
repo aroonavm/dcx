@@ -1,0 +1,42 @@
+name: Validate Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  validate-version:
+    name: Check version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag matches Cargo.toml and Cargo.lock
+        run: |
+          TAG_VERSION="${{ github.ref_name }}"
+          CARGO_TOML_VERSION="v$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)"
+          CARGO_LOCK_VERSION="v$(grep -A1 'name = "dcx"' Cargo.lock | grep '^version' | cut -d'"' -f2)"
+
+          echo "Tag version:           $TAG_VERSION"
+          echo "Cargo.toml version:    $CARGO_TOML_VERSION"
+          echo "Cargo.lock version:    $CARGO_LOCK_VERSION"
+          echo ""
+
+          EXIT_CODE=0
+
+          if [ "$TAG_VERSION" != "$CARGO_TOML_VERSION" ]; then
+            echo "❌ Tag $TAG_VERSION does not match Cargo.toml version $CARGO_TOML_VERSION"
+            EXIT_CODE=1
+          fi
+
+          if [ "$TAG_VERSION" != "$CARGO_LOCK_VERSION" ]; then
+            echo "❌ Tag $TAG_VERSION does not match Cargo.lock version $CARGO_LOCK_VERSION"
+            EXIT_CODE=1
+          fi
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ All versions match: $TAG_VERSION"
+          fi
+
+          exit $EXIT_CODE

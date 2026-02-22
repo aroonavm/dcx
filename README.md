@@ -91,9 +91,54 @@ This installs `dcx` to `~/.cargo/bin/`. Ensure `~/.cargo/bin` is in your `PATH` 
 
 ## Releasing
 
-Tag a commit to trigger the release workflow, which builds binaries for Linux and macOS (x86\_64 + aarch64) and attaches them to the GitHub release:
+The release process builds binaries for all platforms (Linux x86_64/aarch64, macOS x86_64/aarch64) and publishes them as GitHub Release assets, along with a Debian package.
+
+### Release Checklist
+
+1. **Update version** in `Cargo.toml`:
+   ```bash
+   # Edit Cargo.toml, change version = "0.1.0" to version = "0.1.1"
+   ```
+
+2. **Update Cargo.lock** by building:
+   ```bash
+   cargo build --release
+   ```
+
+3. **Commit both files**:
+   ```bash
+   git add Cargo.toml Cargo.lock
+   git commit -m "Bump version to 0.1.1"
+   ```
+
+4. **Create a git tag** (tag must match version in Cargo.toml):
+   ```bash
+   git tag v0.1.1
+   ```
+
+5. **Push commits and tag** (in two steps to avoid race conditions):
+   ```bash
+   git push origin main
+   git push origin v0.1.1
+   ```
+
+The tag push triggers three workflows:
+- `validate-release.yml` — Checks that tag, Cargo.toml, and Cargo.lock all match
+- `release.yml` — Builds binaries for 4 platforms + Debian package + creates GitHub Release
+- If validation fails, release is skipped (CI shows error)
+
+### Installation Methods
+
+Once the GitHub Release is published, users can install from:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+# Install script (auto-detects platform, downloads binary)
+curl -fsSL https://raw.githubusercontent.com/aroonavm/dcx/main/install.sh | sh
+
+# Debian/Ubuntu
+sudo dpkg -i dcx_<version>_amd64.deb
+
+# Manual (download from releases, extract, move to PATH)
+tar -xzf dcx-v<version>-<platform>.tar.gz
+sudo mv dcx /usr/local/bin/
 ```
