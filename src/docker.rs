@@ -26,19 +26,23 @@ pub fn query_container(mount_point: &Path) -> Option<String> {
     if id.is_empty() { None } else { Some(id) }
 }
 
-/// Query `docker ps -a` for any container (running or stopped) associated with `mount_point`.
+/// Query `docker ps -a` for any containers (running or stopped) associated with `mount_point`.
 ///
-/// Returns the short container ID if a container is found, or `None` otherwise.
-/// Takes only the first line of output (handles multi-ID edge cases).
-pub fn query_container_any(mount_point: &Path) -> Option<String> {
+/// Returns a vector of all matching container IDs. If no containers are found, returns an empty vector.
+pub fn query_container_any(mount_point: &Path) -> Vec<String> {
     let label = format!("label=devcontainer.local_folder={}", mount_point.display());
-    let out = cmd::run_capture(
+    let out = match cmd::run_capture(
         "docker",
         &["ps", "-a", "--filter", &label, "--format", "{{.ID}}"],
-    )
-    .ok()?;
-    let id = out.stdout.lines().next().unwrap_or("").trim().to_string();
-    if id.is_empty() { None } else { Some(id) }
+    ) {
+        Ok(out) => out,
+        Err(_) => return vec![],
+    };
+    out.stdout
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect()
 }
 
 /// Stop a running container associated with `mount_point` using `docker stop`.
@@ -496,11 +500,38 @@ pub fn clean_orphaned_build_images() -> Result<usize, String> {
             continue;
         }
 
-        // First check: if the corresponding runtime image still exists, skip this build image.
-        // The runtime image existing means the workspace is still active.
+        // First check: if the corresponding runtime image still exists with RUNNING containers,
+        // skip this build image (workspace is actively using it).
+        // Stopped containers don't count—those should have been cleaned up in clean_one.
         let runtime_image = build_image_to_runtime_image(image_name);
         if image_exists(&runtime_image) {
-            continue;
+            // Runtime image exists, but check if any RUNNING containers use it
+            let check_out = match cmd::run_capture(
+                "docker",
+                &[
+                    "ps",
+                    "--filter",
+                    &format!("ancestor={runtime_image}"),
+                    "--format",
+                    "{{.State}}",
+                ],
+            ) {
+                Ok(out) => out,
+                Err(_) => {
+                    // If we can't query running containers, be conservative and skip
+                    continue;
+                }
+            };
+
+            // If any output lines contain "running", the workspace is active
+            if check_out
+                .stdout
+                .lines()
+                .any(|line| line.contains("running"))
+            {
+                continue;
+            }
+            // Runtime image exists but no running containers—it's orphaned, proceed to removal
         }
 
         // Second check: if any container (running or stopped) directly references this build image, skip it.
@@ -525,7 +556,8 @@ pub fn clean_orphaned_build_images() -> Result<usize, String> {
         }
 
         // Both checks passed: runtime image gone and no containers → safe to remove
-        if let Ok(out) = cmd::run_capture("docker", &["rmi", image_name])
+        // Use --force to handle edge cases where containers were missed
+        if let Ok(out) = cmd::run_capture("docker", &["rmi", "--force", image_name])
             && out.status == 0
         {
             removed += 1;
@@ -596,9 +628,9 @@ pub fn clean_orphaned_images() -> Result<usize, String> {
             continue;
         }
 
-        // No container uses this image; remove by tag (no --force, consistent
-        // with remove_runtime_image which also removes by tag only)
-        if let Ok(out) = cmd::run_capture("docker", &["rmi", image_name])
+        // No container uses this image; remove with --force to handle edge cases
+        // where a stopped container might have been missed or not properly cleaned up
+        if let Ok(out) = cmd::run_capture("docker", &["rmi", "--force", image_name])
             && out.status == 0
         {
             removed += 1;

@@ -92,8 +92,8 @@ pub struct DryRunPlan {
     pub mount_name: String,
     /// State before cleaning: "running", "orphaned", "stale", or "empty dir"
     pub state: String,
-    /// Container ID if present
-    pub container_id: Option<String>,
+    /// Container IDs if present
+    pub container_ids: Vec<String>,
     /// Runtime image ID if present
     pub runtime_image_id: Option<String>,
     /// Whether a dcx-base:<mount_name> tag exists (purge=true)
@@ -114,7 +114,7 @@ pub fn format_dry_run(plans: &[DryRunPlan]) -> String {
     let mut lines = vec!["Would clean:".to_string()];
     for plan in plans {
         lines.push(format!("  {}  ({})", plan.mount_name, plan.state));
-        if let Some(container_id) = &plan.container_id {
+        for container_id in &plan.container_ids {
             lines.push(format!("    - Stop and remove container {}", container_id));
         }
         if let Some(image_id) = &plan.runtime_image_id {
@@ -437,7 +437,7 @@ mod tests {
         let plans = vec![DryRunPlan {
             mount_name: "dcx-myproject-a1b2c3d4".to_string(),
             state: "running".to_string(),
-            container_id: Some("abc123def456".to_string()),
+            container_ids: vec!["abc123def456".to_string()],
             runtime_image_id: Some("sha256:xyz".to_string()),
             has_base_image_tag: false,
             volumes: vec![],
@@ -464,7 +464,7 @@ mod tests {
         let plans = vec![DryRunPlan {
             mount_name: "dcx-myproject-a1b2c3d4".to_string(),
             state: "running".to_string(),
-            container_id: Some("abc123".to_string()),
+            container_ids: vec!["abc123".to_string()],
             runtime_image_id: Some("sha256:xyz".to_string()),
             has_base_image_tag: true,
             volumes: vec!["dcx-shellhistory-abc123".to_string()],
@@ -487,7 +487,7 @@ mod tests {
         let plans = vec![DryRunPlan {
             mount_name: "dcx-old-e5f6g7h8".to_string(),
             state: "orphaned".to_string(),
-            container_id: None,
+            container_ids: vec![],
             runtime_image_id: None,
             has_base_image_tag: false,
             volumes: vec![],
@@ -509,7 +509,7 @@ mod tests {
         let plans = vec![DryRunPlan {
             mount_name: "dcx-old-e5f6g7h8".to_string(),
             state: "stale".to_string(),
-            container_id: None,
+            container_ids: vec![],
             runtime_image_id: None,
             has_base_image_tag: true,
             volumes: vec![],
@@ -530,7 +530,7 @@ mod tests {
             DryRunPlan {
                 mount_name: "dcx-project-a-a1b2c3d4".to_string(),
                 state: "running".to_string(),
-                container_id: Some("abc123".to_string()),
+                container_ids: vec!["abc123".to_string()],
                 runtime_image_id: None,
                 has_base_image_tag: false,
                 volumes: vec![],
@@ -539,7 +539,7 @@ mod tests {
             DryRunPlan {
                 mount_name: "dcx-project-b-e5f6g7h8".to_string(),
                 state: "orphaned".to_string(),
-                container_id: None,
+                container_ids: vec![],
                 runtime_image_id: None,
                 has_base_image_tag: false,
                 volumes: vec![],

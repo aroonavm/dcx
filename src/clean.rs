@@ -27,8 +27,8 @@ struct CleanPlan {
     mount_name: String,
     /// State before cleaning: "running", "orphaned", "stale", or "empty dir"
     state: String,
-    /// Container ID if one exists (populated during scan)
-    container_id: Option<String>,
+    /// Container IDs if any exist (populated during scan)
+    container_ids: Vec<String>,
     /// Runtime image ID (populated during scan if container exists)
     runtime_image_id: Option<String>,
     /// Whether a `dcx-base:<mount_name>` tag exists (populated when purge=true)
@@ -115,8 +115,8 @@ fn execute_one(plan: &CleanPlan) -> Result<(String, String), String> {
     // Stop the container (idempotent if not found)
     docker::stop_container(&plan.mount_point)?;
 
-    // Remove container if we have its ID
-    if let Some(ref container_id) = plan.container_id {
+    // Remove all containers if we have IDs
+    for container_id in &plan.container_ids {
         docker::remove_container(container_id)?;
     }
 
@@ -151,7 +151,7 @@ fn execute_one(plan: &CleanPlan) -> Result<(String, String), String> {
         remove_mount_dir(&plan.mount_point)?;
     }
 
-    let action = if plan.container_id.is_some() {
+    let action = if !plan.container_ids.is_empty() {
         "stopped, removed".to_string()
     } else {
         "removed".to_string()
@@ -174,19 +174,18 @@ fn scan_one(mount_point: &Path, purge: bool) -> CleanPlan {
     let table = platform::read_mount_table().unwrap_or_default();
     let is_mounted = mount_table::find_mount_source(&table, mount_point).is_some();
 
-    // Check for container
-    let container_id = docker::query_container_any(mount_point);
-    let has_container = container_id.is_some();
+    // Check for container(s)
+    let container_ids = docker::query_container_any(mount_point);
+    let has_container = !container_ids.is_empty();
 
     // Determine state
     let state = categorize_mount_state(mount_point, has_container);
 
     // Get runtime image ref if container exists (prefer -uid tag over SHA256)
-    let runtime_image_id = if let Some(ref cid) = container_id {
-        docker::get_runtime_image_ref(cid).ok()
-    } else {
-        None
-    };
+    // Use first container ID if multiple exist (they should all have the same image)
+    let runtime_image_id = container_ids
+        .first()
+        .and_then(|cid| docker::get_runtime_image_ref(cid).ok());
 
     // Check for dcx-base:<mount_name> tag (created during dcx up).
     // This works regardless of whether the mount/workspace still exists.
@@ -197,7 +196,7 @@ fn scan_one(mount_point: &Path, purge: bool) -> CleanPlan {
     };
 
     let volumes = if purge {
-        if let Some(ref cid) = container_id {
+        if let Some(cid) = container_ids.first() {
             docker::get_container_volumes(cid).unwrap_or_default()
         } else {
             vec![]
@@ -210,7 +209,7 @@ fn scan_one(mount_point: &Path, purge: bool) -> CleanPlan {
         mount_point: mount_point.to_path_buf(),
         mount_name,
         state,
-        container_id: container_id.clone(),
+        container_ids,
         runtime_image_id,
         has_base_image_tag,
         volumes,
@@ -245,16 +244,16 @@ fn categorize_mount_state(mount_point: &Path, has_container: bool) -> String {
 /// Perform full cleanup for a single mount entry: stop container, remove container, remove
 /// runtime image, optionally remove base image tag and volumes, unmount, remove dir.
 ///
-/// `container_id` is optional; if None, container/image removal is skipped.
+/// `container_ids` is a slice of container IDs (may be empty); if empty, container/image removal is skipped.
 /// `purge`: if true, also removes the `dcx-base:<mount_name>` tag and Docker volumes.
 /// Returns a tuple of (state_before_cleaning, action_taken).
 fn clean_one(
     mount_point: &Path,
-    container_id: Option<&str>,
+    container_ids: &[String],
     purge: bool,
 ) -> Result<(String, String), String> {
     // Determine state before cleanup
-    let has_container = container_id.is_some();
+    let has_container = !container_ids.is_empty();
     let state_before = categorize_mount_state(mount_point, has_container);
 
     let mount_name = mount_point
@@ -269,17 +268,25 @@ fn clean_one(
     // Stop the container (idempotent if not found)
     docker::stop_container(mount_point)?;
 
-    // Remove container if we have its ID. Must get image ref before removing container!
-    if let Some(id) = container_id {
-        // Get the runtime image reference BEFORE removing the container.
-        // Prefer the repo tag (e.g. vsc-name-hash-uid) over SHA256 so that
-        // docker rmi only removes the -uid tag and does not accidentally delete
-        // the build image when both share the same underlying SHA256.
-        let image_ref = docker::get_runtime_image_ref(id)?;
+    // Remove all containers and their runtime image. Get image ref before removing container!
+    // Prefer the repo tag (e.g. vsc-name-hash-uid) over SHA256 so that
+    // docker rmi only removes the -uid tag and does not accidentally delete
+    // the build image when both share the same underlying SHA256.
+    let mut image_ref: Option<String> = None;
+    for container_id in container_ids {
+        if image_ref.is_none() {
+            // Get the runtime image reference from the first container
+            image_ref = docker::get_runtime_image_ref(container_id).ok();
+        }
         // Then remove the container
-        docker::remove_container(id)?;
-        // Remove the runtime image by tag (no --force) to preserve the build image
-        docker::remove_runtime_image(&image_ref)?;
+        docker::remove_container(container_id)?;
+    }
+
+    // Remove the runtime image if we got its reference from the first container
+    if let Some(ref img_ref) = image_ref {
+        // Try to remove, but don't fail if it's blocked by remaining stopped containers.
+        // The orphan sweeps below will handle them with --force if needed.
+        let _ = docker::remove_runtime_image(img_ref);
     }
 
     // Remove base image tag if purge is enabled.
@@ -357,7 +364,7 @@ pub fn run_clean(
         let dry_run_plan = format::DryRunPlan {
             mount_name: plan.mount_name,
             state: plan.state,
-            container_id: plan.container_id,
+            container_ids: plan.container_ids,
             runtime_image_id: plan.runtime_image_id,
             has_base_image_tag: plan.has_base_image_tag,
             volumes: plan.volumes,
@@ -390,45 +397,43 @@ pub fn run_clean(
         let mut cleaned_count = 0;
         let mut errors = Vec::new();
 
-        // Find container (running or stopped) if mount exists
-        let container_any = if mount_point.exists() {
+        // Find container(s) (running or stopped) if mount exists
+        let container_ids = if mount_point.exists() {
             docker::query_container_any(&mount_point)
         } else {
-            None
+            vec![]
         };
 
         // If container found and running, check with user
-        #[allow(clippy::collapsible_if)]
-        if let Some(ref container_id) = container_any {
-            if docker::query_container(&mount_point).is_some() && !yes {
-                // Container is running, prompt user
-                let mount_name_str = mount_point
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let entries = vec![(
-                    workspace.display().to_string(),
-                    mount_name_str,
-                    container_id.clone(),
-                )];
-                let prompt_text = confirm_prompt(&entries);
-                eprintln!("{prompt_text}");
-                eprint!("\nContinue? [y/N] ");
-                let _ = io::stderr().flush();
-                let stdin = io::stdin();
-                let mut input = String::new();
-                if stdin.lock().read_line(&mut input).is_err() {
-                    return exit_codes::RUNTIME_ERROR;
-                }
-                if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-                    return exit_codes::USER_ABORTED;
-                }
+        if !container_ids.is_empty() && docker::query_container(&mount_point).is_some() && !yes {
+            // Container is running, prompt user
+            let mount_name_str = mount_point
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            // Prompt with first container ID (could be multiple in rare cases)
+            let entries = vec![(
+                workspace.display().to_string(),
+                mount_name_str,
+                container_ids[0].clone(),
+            )];
+            let prompt_text = confirm_prompt(&entries);
+            eprintln!("{prompt_text}");
+            eprint!("\nContinue? [y/N] ");
+            let _ = io::stderr().flush();
+            let stdin = io::stdin();
+            let mut input = String::new();
+            if stdin.lock().read_line(&mut input).is_err() {
+                return exit_codes::RUNTIME_ERROR;
+            }
+            if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                return exit_codes::USER_ABORTED;
             }
         }
 
         // Clean if there's anything to do: mount exists, or purge wants base image tag
         if mount_point.exists() || purge {
-            match clean_one(&mount_point, container_any.as_deref(), purge) {
+            match clean_one(&mount_point, &container_ids, purge) {
                 Ok((was_state, action)) => {
                     println!("Cleaned {}:", workspace.display());
                     println!(
@@ -477,13 +482,13 @@ pub fn run_clean(
                 }
 
                 // Mounted but potentially orphaned - check for container
-                if docker::query_container_any(&path).is_some() {
+                if !docker::query_container_any(&path).is_empty() {
                     // Container exists, don't clean
                     continue;
                 }
 
                 // Mounted but no container for this mount - clean it up (no purge for orphaned)
-                match clean_one(&path, None, false) {
+                match clean_one(&path, &[], false) {
                     Ok((was_state, action)) => {
                         println!("  {}  was: {}  → {}", name, was_state, action);
                         cleaned_count += 1;
@@ -548,7 +553,7 @@ pub fn run_clean(
                     format::DryRunPlan {
                         mount_name: plan.mount_name,
                         state: plan.state,
-                        container_id: plan.container_id,
+                        container_ids: plan.container_ids,
                         runtime_image_id: plan.runtime_image_id,
                         has_base_image_tag: plan.has_base_image_tag,
                         volumes: plan.volumes,
@@ -605,9 +610,9 @@ pub fn run_clean(
                 .unwrap_or_default();
             progress::step(&format!("Cleaning {mount_name_str}..."));
 
-            let container_id = docker::query_container_any(mount_point);
+            let container_ids = docker::query_container_any(mount_point);
 
-            match clean_one(mount_point, container_id.as_deref(), purge) {
+            match clean_one(mount_point, &container_ids, purge) {
                 Ok((was_state, action)) => {
                     cleaned.push(CleanEntry {
                         workspace: None,
@@ -837,6 +842,6 @@ mod tests {
         let plan = scan_one(&fake_mount, false);
         assert_eq!(plan.state, "empty dir");
         assert!(!plan.is_mounted);
-        assert!(plan.container_id.is_none());
+        assert!(plan.container_ids.is_empty());
     }
 }
