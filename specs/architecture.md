@@ -61,13 +61,17 @@ Host /home/user/myproject ──[bindfs]──> Host ~/.colima-mounts/dcx-myproj
 
 **Usage:**
 ```bash
-dcx up [--workspace-folder PATH] [--config PATH] [--dry-run] [--yes] [--open]
+dcx up [--workspace-folder PATH] [--config PATH] [--network MODE] [--dry-run] [--yes]
 ```
 
 **Flags:**
 - `--workspace-folder PATH` — workspace directory (default: current dir)
 - `--config PATH` — explicit path to `devcontainer.json`; skips auto-detection; forwarded to `devcontainer up`. Overridden by `DCX_DEVCONTAINER_CONFIG_PATH` if both are set (flag wins).
-- `--open` — sets `FIREWALL_OPEN=true` in the dcx process environment, which devcontainer forwards into the container via `containerEnv ${localEnv:FIREWALL_OPEN}`; `init-firewall.sh` checks this var and runs with all traffic allowed
+- `--network MODE` — network isolation level (default: `minimal`)
+  - `restricted` — no network access; block all external traffic
+  - `minimal` — dev tools only (GitHub, npm, Anthropic APIs, VSCode, Sentry) [default]
+  - `host` — allow host network only
+  - `open` — unrestricted access; all traffic allowed
 
 **Behavior:**
 1. Validate Docker available; fail with exit 1 if not
@@ -76,14 +80,14 @@ dcx up [--workspace-folder PATH] [--config PATH] [--dry-run] [--yes] [--open]
 4. Guard against recursive mounts (path starts with `~/.colima-mounts/dcx-`)
 5. Verify devcontainer config exists (`.devcontainer/devcontainer.json` or `.devcontainer.json`); skip if `--config` provided
 6. Compute mount point hash
-7. If `--open`: set `FIREWALL_OPEN=true` in host env before spawning devcontainer
+7. Set `DCX_NETWORK_MODE=<mode>` in host env before spawning devcontainer (devcontainer forwards it via `containerEnv`; `init-firewall.sh` applies firewall rules at container startup)
 8. If `--dry-run`: print plan (including `--config` if provided), exit 0
 9. Auto-create `~/.colima-mounts/` (system defaults)
 10. If mount exists: verify health + source matches (idempotent), else recover from stale
 11. If mount missing: create + mount with `bindfs --no-allow-other`
 12. If workspace not owned by user: warn + prompt (skip with `--yes`)
 13. Rewrite `--workspace-folder` → mount point; forward `--config` if provided
-14. Delegate to `devcontainer up`
+14. Delegate to `devcontainer up` (devcontainer stamps container with label `dcx.network-mode=<mode>`)
 15. On failure: rollback (unmount + remove dir), exit 1
 16. On SIGINT: rollback before exit
 
@@ -107,9 +111,10 @@ dcx exec [--workspace-folder PATH] [--config PATH] COMMAND [ARGS...]
 4. Guard: reject `~/.colima-mounts/dcx-*` paths
 5. Verify mount exists + healthy
 6. Find running container by `devcontainer.local_folder` label on the relay mount point
-7. Delegate to `devcontainer exec` with both `--container-id` (reliable container lookup) and `--workspace-folder` pointing to the relay mount point (so devcontainer reads the config and sets the remote working directory); forward `--config` if provided
-8. The user's shell lands in the `workspaceFolder` inside the container (e.g. `/workspaces/<name>`), not the container's home directory
-9. Forward SIGINT to child process
+7. Print network mode (read from container label `dcx.network-mode`)
+8. Delegate to `devcontainer exec` with both `--container-id` (reliable container lookup) and `--workspace-folder` pointing to the relay mount point (so devcontainer reads the config and sets the remote working directory); forward `--config` if provided
+9. The user's shell lands in the `workspaceFolder` inside the container (e.g. `/workspaces/<name>`), not the container's home directory
+10. Forward SIGINT to child process
 
 ---
 
@@ -176,6 +181,7 @@ dcx clean [--workspace-folder PATH] [--all] [--purge] [--dry-run] [--yes]
 | Variable | Used by | Description |
 |---|---|---|
 | `DCX_DEVCONTAINER_CONFIG_PATH` | `up`, `exec` | Default path to `devcontainer.json`. Overridden by `--config` if both are set. |
+| `DCX_NETWORK_MODE` | `init-firewall.sh` (internal) | Set by `dcx up` before spawning devcontainer; forwarded to container via `containerEnv`. Controls firewall rules: `restricted`, `minimal`, `host`, or `open`. |
 
 ---
 

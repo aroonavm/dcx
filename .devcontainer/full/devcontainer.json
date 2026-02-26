@@ -8,7 +8,11 @@
             "ZSH_IN_DOCKER_VERSION": "1.2.0"
         }
     },
-    "runArgs": ["--cap-add=NET_ADMIN", "--cap-add=NET_RAW"],
+    "runArgs": [
+        "--cap-add=NET_ADMIN",
+        "--cap-add=NET_RAW",
+        "--label", "dcx.network-mode=${localEnv:DCX_NETWORK_MODE:minimal}"
+    ],
     "customizations": {
         "vscode": {
             "extensions": [
@@ -47,10 +51,10 @@
         "RUST_BACKTRACE": "1",
         "CLAUDE_CONFIG_DIR": "/home/rust/.claude",
         "POWERLEVEL9K_DISABLE_GITSTATUS": "true",
-        "FIREWALL_OPEN": "${localEnv:FIREWALL_OPEN:false}"
+        "DCX_NETWORK_MODE": "${localEnv:DCX_NETWORK_MODE:minimal}"
     },
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
     "workspaceFolder": "/workspace",
-    "postStartCommand": "sh -c '[ \"$FIREWALL_OPEN\" = true ] && sudo /usr/local/bin/init-firewall.sh --open || sudo /usr/local/bin/init-firewall.sh'",
+    "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
     "waitFor": "postStartCommand"
 }

@@ -140,7 +140,12 @@ pub fn run_exec(
         return exit_codes::RUNTIME_ERROR;
     };
 
-    // 7. Delegate to `devcontainer exec`.
+    // 7. Print network mode if available
+    if let Some(network_mode) = docker::read_network_mode(&container_id) {
+        progress::step(&format!("Network: {}", network_mode));
+    }
+
+    // 8. Delegate to `devcontainer exec`.
     // Pass --container-id for reliable container lookup AND --workspace-folder so
     // devcontainer reads the config and sets the remote working directory correctly
     // (landing the user in the workspace folder, not the container's home dir).

@@ -8,6 +8,8 @@ pub struct StatusRow {
     pub mount: String,
     /// Docker container short ID, or None if no container.
     pub container: Option<String>,
+    /// Network mode (e.g. `minimal`, `open`, `restricted`, `host`), or None if unknown.
+    pub network: Option<String>,
     /// Human-readable state string (e.g. `running`, `stale mount`).
     pub state: String,
 }
@@ -20,16 +22,17 @@ pub fn format_status_table(rows: &[StatusRow]) -> String {
         return "No active workspaces.".to_string();
     }
     let header = format!(
-        "{:<30} {:<30} {:<12} {}",
-        "WORKSPACE", "MOUNT", "CONTAINER", "STATE"
+        "{:<30} {:<30} {:<12} {:<12} {}",
+        "WORKSPACE", "MOUNT", "CONTAINER", "NETWORK", "STATE"
     );
     let mut lines = vec![header];
     for row in rows {
         let workspace = row.workspace.as_deref().unwrap_or("(unknown)");
         let container = row.container.as_deref().unwrap_or("(none)");
+        let network = row.network.as_deref().unwrap_or("–");
         lines.push(format!(
-            "{:<30} {:<30} {:<12} {}",
-            workspace, row.mount, container, row.state
+            "{:<30} {:<30} {:<12} {:<12} {}",
+            workspace, row.mount, container, network, row.state
         ));
     }
     lines.join("\n")
@@ -180,12 +183,14 @@ mod tests {
             workspace: Some("/home/user/project-a".to_string()),
             mount: "dcx-project-a-a1b2c3d4".to_string(),
             container: Some("abc123".to_string()),
+            network: Some("minimal".to_string()),
             state: "running".to_string(),
         }];
         let out = format_status_table(&rows);
         assert!(out.contains("WORKSPACE"), "missing WORKSPACE header");
         assert!(out.contains("MOUNT"), "missing MOUNT header");
         assert!(out.contains("CONTAINER"), "missing CONTAINER header");
+        assert!(out.contains("NETWORK"), "missing NETWORK header");
         assert!(out.contains("STATE"), "missing STATE header");
     }
 
@@ -195,12 +200,14 @@ mod tests {
             workspace: Some("/home/user/project-a".to_string()),
             mount: "dcx-project-a-a1b2c3d4".to_string(),
             container: Some("abc123".to_string()),
+            network: Some("minimal".to_string()),
             state: "running".to_string(),
         }];
         let out = format_status_table(&rows);
         assert!(out.contains("/home/user/project-a"));
         assert!(out.contains("dcx-project-a-a1b2c3d4"));
         assert!(out.contains("abc123"));
+        assert!(out.contains("minimal"));
         assert!(out.contains("running"));
     }
 
@@ -210,6 +217,7 @@ mod tests {
             workspace: Some("/home/user/project-a".to_string()),
             mount: "dcx-project-a-a1b2c3d4".to_string(),
             container: Some("abc123".to_string()),
+            network: Some("minimal".to_string()),
             state: "running".to_string(),
         }];
         let out = format_status_table(&rows);
@@ -230,6 +238,7 @@ mod tests {
             workspace: None,
             mount: "dcx-project-c-i9j0k1l2".to_string(),
             container: None,
+            network: None,
             state: "stale mount".to_string(),
         }];
         let out = format_status_table(&rows);
@@ -245,12 +254,14 @@ mod tests {
                 workspace: Some("/home/user/project-a".to_string()),
                 mount: "dcx-project-a-a1b2c3d4".to_string(),
                 container: Some("abc123".to_string()),
+                network: Some("minimal".to_string()),
                 state: "running".to_string(),
             },
             StatusRow {
                 workspace: Some("/home/user/project-b".to_string()),
                 mount: "dcx-project-b-e5f6g7h8".to_string(),
                 container: None,
+                network: Some("open".to_string()),
                 state: "orphaned".to_string(),
             },
         ];

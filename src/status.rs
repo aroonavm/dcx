@@ -79,10 +79,15 @@ pub fn run_status(home: &Path) -> i32 {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            // Read network mode from container if it exists
+            let network = container
+                .as_ref()
+                .and_then(|c| docker::read_network_mode(c));
             StatusRow {
                 workspace,
                 mount,
                 container,
+                network,
                 state: state.to_string(),
             }
         })

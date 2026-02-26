@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::network_mode::NetworkMode;
+
 #[derive(Parser)]
 #[command(
     name = "dcx",
@@ -35,9 +37,14 @@ pub enum Commands {
         #[arg(long)]
         yes: bool,
 
-        /// Disable container network firewall (passes FIREWALL_OPEN=true to the container)
-        #[arg(long)]
-        open: bool,
+        /// Network isolation level (default: minimal)
+        ///
+        /// - restricted: no network access (block all traffic)
+        /// - minimal: dev tools only (GitHub, npm, Anthropic) [default]
+        /// - host: allow host network only
+        /// - open: unrestricted access
+        #[arg(long, value_name = "MODE", default_value = "minimal")]
+        network: NetworkMode,
     },
 
     /// Run a command inside the devcontainer

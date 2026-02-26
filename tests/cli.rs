@@ -99,8 +99,8 @@ fn up_dry_run_with_valid_workspace_prints_plan() {
 }
 
 #[test]
-fn up_open_flag_is_accepted() {
-    // `dcx up --open --dry-run` must not fail with exit 2 (clap parse error).
+fn up_network_flag_is_accepted() {
+    // `dcx up --network open --dry-run` must not fail with exit 2 (clap parse error).
     // It may exit 0 (plan printed) or 1 (Docker unavailable).
     use assert_fs::TempDir;
     use assert_fs::prelude::*;
@@ -112,7 +112,8 @@ fn up_open_flag_is_accepted() {
     let out = dcx()
         .args([
             "up",
-            "--open",
+            "--network",
+            "open",
             "--dry-run",
             "--workspace-folder",
             workspace.path().to_str().unwrap(),

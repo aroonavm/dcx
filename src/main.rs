@@ -11,6 +11,7 @@ mod exit_codes;
 mod format;
 mod mount_table;
 mod naming;
+mod network_mode;
 mod platform;
 mod progress;
 mod signals;
@@ -37,18 +38,16 @@ fn main() {
             config,
             dry_run,
             yes,
-            open,
+            network,
         } => {
             let config = config.or_else(|| {
                 std::env::var("DCX_DEVCONTAINER_CONFIG_PATH")
                     .ok()
                     .map(std::path::PathBuf::from)
             });
-            if open {
-                // SAFETY: single-threaded at this point; set before spawning devcontainer
-                unsafe {
-                    std::env::set_var("FIREWALL_OPEN", "true");
-                }
+            // SAFETY: single-threaded at this point; set before spawning devcontainer
+            unsafe {
+                std::env::set_var("DCX_NETWORK_MODE", network.to_string());
             }
             std::process::exit(up::run_up(
                 &home_dir(),

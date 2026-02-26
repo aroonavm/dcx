@@ -2,15 +2,13 @@
 set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 IFS=$'\n\t'       # Stricter word splitting
 
-# --open: flush rules and set all policies to ACCEPT (no restrictions).
-# Usage: sudo init-firewall.sh [--open]
-OPEN=false
-for arg in "$@"; do
-    case "$arg" in
-        --open) OPEN=true ;;
-        *) echo "Unknown argument: $arg"; exit 1 ;;
-    esac
-done
+# DCX_NETWORK_MODE environment variable controls firewall behavior:
+# - restricted: no network access (drop all traffic)
+# - minimal:    dev tools only (GitHub, npm, Anthropic, etc.) [default]
+# - host:       allow host network only
+# - open:       unrestricted access
+
+NETWORK_MODE="${DCX_NETWORK_MODE:-minimal}"
 
 # 1. Extract Docker DNS info BEFORE any flushing
 DOCKER_DNS_RULES=$(iptables-save -t nat | grep "127\.0\.0\.11" || true)
@@ -34,13 +32,73 @@ else
     echo "No Docker DNS rules to restore"
 fi
 
-if [ "${FIREWALL_OPEN:-false}" = "true" ] || [ "$OPEN" = "true" ]; then
-    iptables -P INPUT ACCEPT
-    iptables -P FORWARD ACCEPT
-    iptables -P OUTPUT ACCEPT
-    echo "Firewall open — all traffic allowed"
-    exit 0
-fi
+# Handle each network mode
+case "$NETWORK_MODE" in
+    restricted)
+        # Completely restrict all traffic - drop everything
+        iptables -P INPUT DROP
+        iptables -P FORWARD DROP
+        iptables -P OUTPUT DROP
+        # Allow localhost for basic functionality
+        iptables -A INPUT -i lo -j ACCEPT
+        iptables -A OUTPUT -o lo -j ACCEPT
+        echo "Firewall restricted — all external traffic blocked"
+        exit 0
+        ;;
+
+    open)
+        # Allow all traffic unrestricted
+        iptables -P INPUT ACCEPT
+        iptables -P FORWARD ACCEPT
+        iptables -P OUTPUT ACCEPT
+        echo "Firewall open — all traffic allowed"
+        exit 0
+        ;;
+
+    host)
+        # Allow only host network traffic + localhost
+        # Get host IP from default route
+        HOST_IP=$(ip route | grep default | cut -d" " -f3)
+        if [ -z "$HOST_IP" ]; then
+            echo "ERROR: Failed to detect host IP"
+            exit 1
+        fi
+
+        HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
+        echo "Host network detected as: $HOST_NETWORK"
+
+        # Allow DNS for basic connectivity
+        iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+        iptables -A INPUT -p udp --sport 53 -j ACCEPT
+
+        # Allow localhost
+        iptables -A INPUT -i lo -j ACCEPT
+        iptables -A OUTPUT -o lo -j ACCEPT
+
+        # Allow host network
+        iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
+        iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
+
+        # Allow established connections
+        iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+        # Set default policies to DROP
+        iptables -P INPUT DROP
+        iptables -P FORWARD DROP
+        iptables -P OUTPUT DROP
+
+        echo "Firewall host mode — only host network allowed"
+        exit 0
+        ;;
+
+    minimal|*)
+        # Default: allow dev tools (GitHub, npm, Anthropic, etc.)
+        # Fall through to setup below
+        ;;
+esac
+
+# --- Minimal mode setup (dev tools) ---
 
 # First allow DNS and localhost before any restrictions
 # Allow outbound DNS
@@ -137,7 +195,7 @@ iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
 # Explicitly REJECT all other outbound traffic for immediate feedback
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
 
-echo "Firewall configuration complete"
+echo "Firewall configuration complete (minimal mode)"
 echo "Verifying firewall rules..."
 if curl --connect-timeout 5 https://example.com >/dev/null 2>&1; then
     echo "ERROR: Firewall verification failed - was able to reach https://example.com"

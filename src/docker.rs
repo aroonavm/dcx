@@ -71,6 +71,29 @@ pub fn remove_container(container_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Get the network mode label from a container by inspecting it.
+///
+/// Returns `Some(mode)` if the label exists, `None` if not found or container doesn't exist.
+pub fn read_network_mode(container_id: &str) -> Option<String> {
+    let out = cmd::run_capture(
+        "docker",
+        &[
+            "inspect",
+            "--format={{index .Config.Labels \"dcx.network-mode\"}}",
+            container_id,
+        ],
+    )
+    .ok()?;
+
+    let mode = out.stdout.trim();
+    // "no value" means the label doesn't exist
+    if mode.is_empty() || mode.contains("no value") {
+        None
+    } else {
+        Some(mode.to_string())
+    }
+}
+
 /// Get the image ID from a container by inspecting it.
 ///
 /// Returns `Err(message)` if the inspect command fails.
