@@ -48,17 +48,34 @@ dcx up --workspace-folder ~/project-b       # Uses env var config
 dcx up --workspace-folder ~/project-c --config /other/config.json  # Flag overrides env var
 ```
 
+### Network Isolation
+
+Control network access per container with `--network`:
+
 ```bash
-# Shared dev environment: same devcontainer.json, multiple workspaces
-# First workspace: builds base image once from devcontainer.json
-dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/project-a
+# Default: minimal — dev tools only (GitHub, npm, Anthropic APIs, VSCode, Sentry)
+dcx up --workspace-folder ~/my-project
 
-# Second workspace: reuses the same base image (instant, no rebuild)
-dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/project-b
+# Restricted: no external network access
+dcx up --workspace-folder ~/my-project --network restricted
 
-# --open controls the firewall per container:
-dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/project-c --open
-# project-c has no network restrictions; project-a and project-b retain theirs.
+# Host-only: connect to services on host machine (localhost:*)
+dcx up --workspace-folder ~/my-project --network host
+
+# Open: unrestricted access (use for local dev only)
+dcx up --workspace-folder ~/my-project --network open
+```
+
+Each container gets its own network mode. Useful for:
+- **Security:** Autonomous agents with restricted network (can't exfiltrate data)
+- **Sandboxing:** Different projects with different trust levels
+- **Testing:** Host-only mode to test against local services
+
+```bash
+# Example: Shared dev environment with mixed trust levels
+dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/trusted-project --network minimal
+dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/untrusted-agent --network restricted
+dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/testing-project --network host
 
 # The base image is shared: same devcontainer.json content → same image.
 # Changing devcontainer.json (e.g. bumping a package version) triggers a new build.
