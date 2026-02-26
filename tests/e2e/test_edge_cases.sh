@@ -8,7 +8,6 @@ require_e2e_deps
 echo "=== edge cases ==="
 
 RELAY="$HOME/.colima-mounts"
-e2e_cleanup
 
 # --- Hash stability (same workspace → same mount name) ---
 echo "--- hash stability ---"
@@ -27,6 +26,7 @@ MOUNT2=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1 | xargs basename)
 # --- Workspace path with spaces ---
 echo "--- path with spaces ---"
 WS_SPACES=$(mktemp -d -t "dcx e2e XXXXXX")
+TRACKED_WORKSPACES+=("$WS_SPACES")
 trap 'e2e_cleanup; rm -rf "$WS" "$WS_SPACES"' EXIT
 mkdir -p "$WS_SPACES/.devcontainer"
 cat >"$WS_SPACES/.devcontainer/devcontainer.json" <<'EOF'
@@ -43,6 +43,7 @@ rm -rf "$WS_SPACES"
 # --- Sanitized mount name ---
 echo "--- mount name sanitization ---"
 WS3=$(mktemp -d -t "my.project.XXXXXX")
+TRACKED_WORKSPACES+=("$WS3")
 trap 'e2e_cleanup; rm -rf "$WS" "$WS3"' EXIT
 mkdir -p "$WS3/.devcontainer"
 cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'
@@ -75,8 +76,6 @@ code=0
 "$DCX" up --workspace-folder "$WS4" 2>/dev/null || code=$?
 assert_exit "up recovers from stale mount" 0 "$code"
 is_mounted "$MOUNT_DIR4" && pass "mount is healthy after stale recovery" || fail "mount still unhealthy after recovery"
-e2e_cleanup
-rm -rf "$WS4"
 
 # --- Shell completion is valid bash syntax ---
 echo "--- bash completion validity ---"

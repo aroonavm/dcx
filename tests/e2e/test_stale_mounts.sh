@@ -10,7 +10,6 @@ echo "=== dcx stale mount recovery ==="
 
 RELAY="$HOME/.colima-mounts"
 mkdir -p "$RELAY"
-e2e_cleanup
 
 # --- Stale mount is detected and cleaned ---
 echo "--- stale mount detection and cleanup ---"
@@ -76,8 +75,5 @@ assert_not_contains "no error message" "$out" "ERROR"
 echo "  Verifying status is empty after cleanup..."
 out=$("$DCX" status 2>/dev/null)
 assert_contains "status shows no active workspaces" "$out" "No active workspaces."
-
-e2e_cleanup
-rm -rf "$WS"
 
 summary

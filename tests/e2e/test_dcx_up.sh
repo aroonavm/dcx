@@ -101,7 +101,6 @@ else
     "$DCX" up --workspace-folder "$WS_ROOT" --yes 2>/dev/null || code=$?
     [ "$code" -ne 4 ] && pass "up non-owned dir --yes skips prompt" || fail "up --yes still returned 4"
     sudo chown "$(id -u):$(id -g)" "$WS_ROOT"
-    e2e_cleanup
     rm -rf "$WS_ROOT"
 fi
 

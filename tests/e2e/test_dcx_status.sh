@@ -8,7 +8,6 @@ require_e2e_deps
 echo "=== dcx status ==="
 
 RELAY="$HOME/.colima-mounts"
-e2e_cleanup
 
 # --- Empty state ---
 echo "--- empty state ---"
@@ -53,8 +52,5 @@ assert_contains "status shows first workspace" "$out" "$WS"
 assert_contains "status shows second workspace" "$out" "$WS2"
 RUNNING_COUNT=$(echo "$out" | grep -c "running" || true)
 [ "$RUNNING_COUNT" -ge 1 ] && pass "at least one running workspace shown" || fail "expected at least one running workspace"
-
-e2e_cleanup
-rm -rf "$WS" "$WS2"
 
 summary

@@ -30,6 +30,8 @@ Tests that build the `dcx` binary and run it as a subprocess against controlled 
 
 **Location:** `tests/` directory (Rust integration test convention).
 
+**Coverage:** Includes testing of `dcx clean --all` behavior in isolated temporary home directories, ensuring `--all` semantics are verified without affecting real system state.
+
 **Crates:**
 - `assert_cmd` — run binary, assert on stdout/stderr/exit code
 - `predicates` — expressive assertions (contains, matches, etc.)
@@ -38,6 +40,11 @@ Tests that build the `dcx` binary and run it as a subprocess against controlled 
 ## Layer 3: Shell E2E Tests (requires Colima + Docker + bindfs)
 
 Shell scripts that test the full mount → container → cleanup lifecycle. These are slow and require the full environment. Covers all behaviors that involve real bindfs mounts, Docker containers, and Colima interaction.
+
+**Isolation Guarantee:** E2E tests use workspace tracking to clean up only their own artifacts. Tests do NOT use `dcx clean --all` to avoid interfering with concurrent workspaces. This means:
+- Each test creates workspaces via `make_workspace()`, which auto-tracks them
+- Cleanup uses `dcx clean --workspace-folder <path>` per tracked workspace
+- Tests can run in parallel without destroying each other's containers/mounts
 
 **Guard:** `require_e2e_deps` — skips if Colima, Docker, bindfs, or devcontainer CLI is missing.
 

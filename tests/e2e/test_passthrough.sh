@@ -9,7 +9,9 @@ echo "=== dcx pass-through (Docker-only) ==="
 
 # --- Unknown subcommands forward to devcontainer ---
 echo "--- unknown subcommand forwarding ---"
-out=$("$DCX" read-configuration --workspace-folder "$(make_workspace)" 2>&1) || true
+ws1=$(make_workspace)
+trap 'e2e_cleanup' EXIT
+out=$("$DCX" read-configuration --workspace-folder "$ws1" 2>&1) || true
 code=$?
 # devcontainer read-configuration should succeed (exit 0) when forwarded
 assert_exit "read-configuration forwards to devcontainer" 0 "$code"

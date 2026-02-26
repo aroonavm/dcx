@@ -121,8 +121,13 @@ assert_dir_missing() {
 
 # --- Workspace helpers ---
 
+# Track workspaces created during this test session so we can clean them up individually.
+# This avoids using dcx clean --all which would affect other concurrent workspaces.
+declare -a TRACKED_WORKSPACES=()
+
 # Create a minimal devcontainer workspace in a new temp dir.
 # Prints the path to the created workspace.
+# Automatically tracks the workspace for cleanup.
 make_workspace() {
     local tmpdir
     tmpdir=$(mktemp -d)
@@ -132,6 +137,7 @@ make_workspace() {
     "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
 }
 EOF
+    TRACKED_WORKSPACES+=("$tmpdir")
     echo "$tmpdir"
 }
 
@@ -145,7 +151,13 @@ is_mounted() {
     fi
 }
 
-# Clean up all dcx-managed mounts. Called from trap EXIT handlers.
+# Clean up only the workspaces created by this test session.
+# Uses dcx clean --workspace-folder for each tracked workspace (not --all).
+# This ensures tests don't interfere with other concurrent workspaces.
 e2e_cleanup() {
-    "$DCX" clean --all --yes 2>/dev/null || true
+    local ws
+    for ws in "${TRACKED_WORKSPACES[@]}"; do
+        "$DCX" clean --workspace-folder "$ws" --yes 2>/dev/null || true
+    done
+    TRACKED_WORKSPACES=()
 }
