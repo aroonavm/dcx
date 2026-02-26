@@ -152,12 +152,14 @@ is_mounted() {
 }
 
 # Clean up only the workspaces created by this test session.
-# Uses dcx clean --workspace-folder for each tracked workspace (not --all).
-# This ensures tests don't interfere with other concurrent workspaces.
+# Uses dcx down --workspace-folder for each tracked workspace (not dcx clean).
+# dcx down is safe: it only stops the container and unmounts the relay for the
+# specific workspace. It does NOT scan for orphaned mounts, does NOT run global
+# Docker image/container cleanup, and cannot affect other workspaces.
 e2e_cleanup() {
     local ws
     for ws in "${TRACKED_WORKSPACES[@]}"; do
-        "$DCX" clean --workspace-folder "$ws" --yes 2>/dev/null || true
+        "$DCX" down --workspace-folder "$ws" 2>/dev/null || true
     done
     TRACKED_WORKSPACES=()
 }

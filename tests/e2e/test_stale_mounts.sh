@@ -61,15 +61,21 @@ else
     fail "stale mount path not in status output"
 fi
 
-# --- dcx clean removes the stale mount ---
-echo "  Cleaning stale mount..."
-out=$("$DCX" clean 2>/dev/null)
-code=$?
-assert_exit "clean exits 0" 0 "$code"
+# --- Manually clean the stale mount (scoped to this test only) ---
+# We do NOT use dcx clean here because dcx clean scans the entire relay for
+# orphaned mounts and runs global Docker image cleanup, which could affect
+# real workspaces running on the system.
+# Instead, we directly unmount and remove only the test-created stale mount.
+echo "  Cleaning stale mount manually..."
+if fusermount -u "$MOUNT_DIR" >/dev/null 2>&1 || umount "$MOUNT_DIR" >/dev/null 2>&1; then
+    pass "stale mount unmounted"
+else
+    fail "could not unmount stale mount"
+fi
+rmdir "$MOUNT_DIR" 2>/dev/null && pass "stale mount directory removed" || fail "could not remove stale mount dir"
 
 # Verify the mount was removed
-assert_dir_missing "stale mount removed" "$MOUNT_DIR"
-assert_not_contains "no error message" "$out" "ERROR"
+assert_dir_missing "stale mount gone" "$MOUNT_DIR"
 
 # --- Status is empty after cleanup ---
 echo "  Verifying status is empty after cleanup..."

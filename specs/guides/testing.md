@@ -41,10 +41,11 @@ Tests that build the `dcx` binary and run it as a subprocess against controlled 
 
 Shell scripts that test the full mount → container → cleanup lifecycle. These are slow and require the full environment. Covers all behaviors that involve real bindfs mounts, Docker containers, and Colima interaction.
 
-**Isolation Guarantee:** E2E tests use workspace tracking to clean up only their own artifacts. Tests do NOT use `dcx clean --all` to avoid interfering with concurrent workspaces. This means:
-- Each test creates workspaces via `make_workspace()`, which auto-tracks them
-- Cleanup uses `dcx clean --workspace-folder <path>` per tracked workspace
-- Tests can run in parallel without destroying each other's containers/mounts
+**Isolation Guarantee:** E2E tests NEVER call `dcx clean`. Cleanup uses `dcx down --workspace-folder` per tracked workspace only.
+
+**Why not `dcx clean`:** `dcx clean --workspace-folder` has global side effects beyond the target workspace — it scans ALL relay mounts for orphans and runs global Docker image cleanup. These can delete containers and mounts belonging to real workspaces running on the same system. `dcx down` is safe: it only stops the container and unmounts the relay for the specific workspace, nothing else.
+
+**`dcx clean` is tested exclusively in Layer 2** (Rust integration tests) with isolated temporary HOME directories.
 
 **Guard:** `require_e2e_deps` — skips if Colima, Docker, bindfs, or devcontainer CLI is missing.
 
@@ -53,11 +54,10 @@ Shell scripts that test the full mount → container → cleanup lifecycle. Thes
 ```
 tests/
   ├── e2e/
-  │   ├── setup.sh              # Common setup/teardown helpers
+  │   ├── setup.sh              # Common setup/teardown helpers (uses dcx down for cleanup)
   │   ├── test_dcx_up.sh
   │   ├── test_dcx_exec.sh
   │   ├── test_dcx_down.sh
-  │   ├── test_dcx_clean.sh
   │   ├── test_dcx_status.sh
   │   ├── test_dcx_doctor.sh
   │   ├── test_edge_cases.sh
