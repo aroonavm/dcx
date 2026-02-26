@@ -36,12 +36,16 @@ fi
 case "$NETWORK_MODE" in
     restricted)
         # Completely restrict all traffic - drop everything
-        iptables -P INPUT DROP
-        iptables -P FORWARD DROP
-        iptables -P OUTPUT DROP
         # Allow localhost for basic functionality
         iptables -A INPUT -i lo -j ACCEPT
         iptables -A OUTPUT -o lo -j ACCEPT
+        # Allow established connections (needed for Docker internal networking)
+        iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        # Set default policies to DROP
+        iptables -P INPUT DROP
+        iptables -P FORWARD DROP
+        iptables -P OUTPUT DROP
         echo "Firewall restricted — all external traffic blocked"
         exit 0
         ;;
@@ -92,9 +96,13 @@ case "$NETWORK_MODE" in
         exit 0
         ;;
 
-    minimal|*)
+    minimal)
         # Default: allow dev tools (GitHub, npm, Anthropic, etc.)
         # Fall through to setup below
+        ;;
+    *)
+        echo "ERROR: unknown DCX_NETWORK_MODE: $NETWORK_MODE" >&2
+        exit 1
         ;;
 esac
 

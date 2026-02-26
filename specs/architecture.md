@@ -80,7 +80,7 @@ dcx up [--workspace-folder PATH] [--config PATH] [--network MODE] [--dry-run] [-
 4. Guard against recursive mounts (path starts with `~/.colima-mounts/dcx-`)
 5. Verify devcontainer config exists (`.devcontainer/devcontainer.json` or `.devcontainer.json`); skip if `--config` provided
 6. Compute mount point hash
-7. Set `DCX_NETWORK_MODE=<mode>` in host env before spawning devcontainer (devcontainer forwards it via `containerEnv`; `init-firewall.sh` applies firewall rules at container startup)
+7. Set `DCX_NETWORK_MODE=<mode>` in host env before spawning devcontainer (devcontainer forwards it via `containerEnv`; `postStartCommand` uses `sudo --preserve-env=DCX_NETWORK_MODE` so the firewall script sees the mode)
 8. If `--dry-run`: print plan (including `--config` if provided), exit 0
 9. Auto-create `~/.colima-mounts/` (system defaults)
 10. If mount exists: verify health + source matches (idempotent), else recover from stale
