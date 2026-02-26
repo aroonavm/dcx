@@ -15,11 +15,11 @@ WS=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS"' EXIT
 
 "$DCX" up --workspace-folder "$WS" 2>/dev/null
-MOUNT1=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1 | xargs basename)
+MOUNT1=$(basename "$(relay_dir_for "$WS")")
 
 "$DCX" down --workspace-folder "$WS" 2>/dev/null
 "$DCX" up --workspace-folder "$WS" 2>/dev/null
-MOUNT2=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1 | xargs basename)
+MOUNT2=$(basename "$(relay_dir_for "$WS")")
 
 [ "$MOUNT1" = "$MOUNT2" ] && pass "hash is stable across up/down/up cycles" || fail "mount name changed: $MOUNT1 → $MOUNT2"
 
@@ -63,10 +63,8 @@ rm -rf "$WS3"
 echo "--- stale mount recovery ---"
 WS4=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS" "$WS4"' EXIT
-# Bring WS down first so only WS4 is in the relay (avoids tail -1 ordering issues).
-"$DCX" down --workspace-folder "$WS" 2>/dev/null || true
 "$DCX" up --workspace-folder "$WS4" 2>/dev/null
-MOUNT_DIR4=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
+MOUNT_DIR4=$(relay_dir_for "$WS4")
 # Simulate stale state: take WS4 down (removes mount + dir), then recreate
 # the empty directory. Models a FUSE mount that died without cleanup.
 "$DCX" down --workspace-folder "$WS4" 2>/dev/null || true

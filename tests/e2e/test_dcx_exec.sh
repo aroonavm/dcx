@@ -44,7 +44,7 @@ code=0
 
 # --- Stale mount ---
 echo "--- stale mount ---"
-MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
+MOUNT_DIR=$(relay_dir_for "$WS")
 # Simulate stale state: take down the workspace (removes mount + dir), then
 # recreate the empty directory. This models a FUSE mount that died without
 # cleanup — the relay dir exists but is no longer mounted.

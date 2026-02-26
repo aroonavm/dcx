@@ -77,9 +77,9 @@ rmdir "$MOUNT_DIR" 2>/dev/null && pass "stale mount directory removed" || fail "
 # Verify the mount was removed
 assert_dir_missing "stale mount gone" "$MOUNT_DIR"
 
-# --- Status is empty after cleanup ---
-echo "  Verifying status is empty after cleanup..."
+# --- The stale mount no longer appears in status after cleanup ---
+echo "  Verifying stale mount gone from status..."
 out=$("$DCX" status 2>/dev/null)
-assert_contains "status shows no active workspaces" "$out" "No active workspaces."
+assert_not_contains "stale mount not in status" "$out" "dcx-stale-test-00000000"
 
 summary

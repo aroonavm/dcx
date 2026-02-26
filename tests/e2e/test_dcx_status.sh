@@ -9,12 +9,11 @@ echo "=== dcx status ==="
 
 RELAY="$HOME/.colima-mounts"
 
-# --- Empty state ---
-echo "--- empty state ---"
+# --- Status exits 0 (even with pre-existing workspaces on the system) ---
+echo "--- exits 0 ---"
 out=$("$DCX" status 2>/dev/null)
 code=$?
-assert_exit "status exits 0 with no mounts" 0 "$code"
-assert_contains "status says no active workspaces" "$out" "No active workspaces."
+assert_exit "status exits 0" 0 "$code"
 
 # --- Running container shows as running ---
 echo "--- running container ---"
@@ -34,8 +33,8 @@ assert_contains "status shows running state" "$out" "running"
 
 # --- Orphaned mount shows as orphaned ---
 echo "--- orphaned mount ---"
-MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
-CONTAINER=$(docker ps --filter "label=devcontainer.local_folder=$MOUNT_DIR" --format "{{.ID}}" 2>/dev/null | head -1)
+WS_RELAY=$(relay_dir_for "$WS")
+CONTAINER=$(docker ps --filter "label=devcontainer.local_folder=$WS_RELAY" --format "{{.ID}}" 2>/dev/null | head -1)
 [ -n "$CONTAINER" ] && docker stop "$CONTAINER" >/dev/null 2>&1 || true
 
 out=$("$DCX" status 2>/dev/null)

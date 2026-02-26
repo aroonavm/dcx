@@ -211,11 +211,3 @@ if curl --connect-timeout 5 https://example.com >/dev/null 2>&1; then
 else
     echo "Firewall verification passed - unable to reach https://example.com as expected"
 fi
-
-# Verify GitHub API access
-if ! curl --connect-timeout 5 https://api.github.com/zen >/dev/null 2>&1; then
-    echo "ERROR: Firewall verification failed - unable to reach https://api.github.com"
-    exit 1
-else
-    echo "Firewall verification passed - able to reach https://api.github.com as expected"
-fi

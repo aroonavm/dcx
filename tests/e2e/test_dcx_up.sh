@@ -18,49 +18,53 @@ code=0
 "$DCX" up --workspace-folder "$WS" 2>/dev/null || code=$?
 assert_exit "up exits 0" 0 "$code"
 
-MOUNT_DIR=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | head -1)
-[ -n "$MOUNT_DIR" ] && pass "mount directory created in relay" || fail "no dcx-* entry in relay"
-is_mounted "$MOUNT_DIR" && pass "mount is active in mount table" || fail "mount not in mount table"
+WS_RELAY=$(relay_dir_for "$WS")
+assert_dir_exists "mount directory created in relay" "$WS_RELAY"
+is_mounted "$WS_RELAY" && pass "mount is active in mount table" || fail "mount not in mount table"
 
 # --- Idempotent reuse ---
 echo "--- idempotent reuse ---"
+RELAY_SNAPSHOT_BEFORE=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
 code=0
 "$DCX" up --workspace-folder "$WS" 2>/dev/null || code=$?
 assert_exit "second up exits 0" 0 "$code"
-
-MOUNT_COUNT=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)
-[ "$MOUNT_COUNT" -eq 1 ] && pass "only one dcx-* entry after two ups" || fail "expected 1 dcx-* entry, got $MOUNT_COUNT"
+RELAY_SNAPSHOT_AFTER=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
+[ "$RELAY_SNAPSHOT_BEFORE" = "$RELAY_SNAPSHOT_AFTER" ] && \
+    pass "only one dcx-* entry after two ups" || \
+    fail "relay changed after idempotent up — before: $(echo "$RELAY_SNAPSHOT_BEFORE" | xargs -r basename) after: $(echo "$RELAY_SNAPSHOT_AFTER" | xargs -r basename)"
 
 # --- Dry-run: no side effects ---
 echo "--- dry-run ---"
 WS2=$(make_workspace)
+RELAY_SNAPSHOT_BEFORE=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
 dry_out=$("$DCX" up --dry-run --workspace-folder "$WS2" 2>/dev/null)
 dry_code=$?
 assert_exit "dry-run exits 0" 0 "$dry_code"
 assert_contains "dry-run shows Would mount" "$dry_out" "Would mount:"
 assert_contains "dry-run shows Would run" "$dry_out" "Would run:"
-# No mount should have been created for WS2
-MOUNT_COUNT_AFTER=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)
-[ "$MOUNT_COUNT_AFTER" -eq 1 ] && pass "dry-run creates no mount" || fail "dry-run created a mount"
+RELAY_SNAPSHOT_AFTER=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
+[ "$RELAY_SNAPSHOT_BEFORE" = "$RELAY_SNAPSHOT_AFTER" ] && \
+    pass "dry-run creates no mount" || fail "dry-run created a mount"
 rm -rf "$WS2"
 
 # --- Rollback on devcontainer failure ---
 echo "--- rollback on failure ---"
 WS3=$(make_workspace)
 # Replace the image with a non-existent one to force devcontainer up to fail.
+# Pass --config explicitly to prevent DCX_DEVCONTAINER_CONFIG_PATH from overriding.
 cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'
 {
     "image": "dcx-e2e-nonexistent-image:0.0.0"
 }
 EOF
 
-MOUNT_COUNT_BEFORE=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)
+RELAY_SNAPSHOT_BEFORE=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
 fail_code=0
-fail_out=$("$DCX" up --workspace-folder "$WS3" 2>&1) || fail_code=$?
+fail_out=$("$DCX" up --workspace-folder "$WS3" --config "$WS3/.devcontainer/devcontainer.json" 2>&1) || fail_code=$?
 assert_exit "rollback: up exits 1" 1 "$fail_code"
 assert_contains "rollback prints message" "$fail_out" "Mount rolled back."
-MOUNT_COUNT_AFTER2=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | wc -l)
-[ "$MOUNT_COUNT_AFTER2" -eq "$MOUNT_COUNT_BEFORE" ] && \
+RELAY_SNAPSHOT_AFTER=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
+[ "$RELAY_SNAPSHOT_BEFORE" = "$RELAY_SNAPSHOT_AFTER" ] && \
     pass "rollback: no leftover mount" || fail "rollback left a mount behind"
 rm -rf "$WS3"
 

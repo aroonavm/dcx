@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# Prevent the host's DCX_DEVCONTAINER_CONFIG_PATH from leaking into tests.
+# Tests that need to test env-var behaviour set it explicitly themselves.
+unset DCX_DEVCONTAINER_CONFIG_PATH || true
+
 # Locate the dcx binary: prefer the debug build next to this file.
 DCX=${DCX:-$(cd "$(dirname "$0")/../.." && pwd)/target/debug/dcx}
 
@@ -139,6 +143,27 @@ make_workspace() {
 EOF
     TRACKED_WORKSPACES+=("$tmpdir")
     echo "$tmpdir"
+}
+
+# Compute the expected relay directory path for a given workspace.
+# Mirrors the Rust logic in naming.rs exactly so tests can reference specific
+# relay dirs without depending on ls ordering or pre-existing relay entries.
+#
+# Usage: relay_dir=$(relay_dir_for "/path/to/workspace")
+relay_dir_for() {
+    local ws_abs
+    ws_abs=$(realpath "$1" 2>/dev/null || echo "$1")
+    local last_component
+    last_component=$(basename "$ws_abs")
+    # Sanitize: replace non-alphanumeric (except '-') with '-', take first 30 chars.
+    # Matches: name.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' }).take(30)
+    local sanitized
+    sanitized=$(printf '%s' "$last_component" | tr -c 'a-zA-Z0-9-' '-' | head -c 30)
+    # Hash: first 8 hex chars of SHA256 of the absolute path.
+    # Matches: sha2::Sha256::digest(workspace.to_string_lossy().as_bytes())[..8]
+    local hash
+    hash=$(printf '%s' "$ws_abs" | sha256sum | head -c 8)
+    echo "$HOME/.colima-mounts/dcx-${sanitized}-${hash}"
 }
 
 # Check whether a path is currently FUSE-mounted (Linux + macOS).
