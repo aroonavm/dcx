@@ -26,7 +26,7 @@ MOUNT2=$(basename "$(relay_dir_for "$WS")")
 # --- Workspace path with spaces ---
 echo "--- path with spaces ---"
 WS_SPACES=$(mktemp -d -t "dcx e2e XXXXXX")
-TRACKED_WORKSPACES+=("$WS_SPACES")
+echo "$WS_SPACES" >> "$_CLEANUP_LIST"
 trap 'e2e_cleanup; rm -rf "$WS" "$WS_SPACES"' EXIT
 mkdir -p "$WS_SPACES/.devcontainer"
 cat >"$WS_SPACES/.devcontainer/devcontainer.json" <<'EOF'
@@ -43,7 +43,7 @@ rm -rf "$WS_SPACES"
 # --- Sanitized mount name ---
 echo "--- mount name sanitization ---"
 WS3=$(mktemp -d -t "my.project.XXXXXX")
-TRACKED_WORKSPACES+=("$WS3")
+echo "$WS3" >> "$_CLEANUP_LIST"
 trap 'e2e_cleanup; rm -rf "$WS" "$WS3"' EXIT
 mkdir -p "$WS3/.devcontainer"
 cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'

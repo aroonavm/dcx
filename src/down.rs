@@ -79,13 +79,19 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
         return exit_codes::SUCCESS;
     }
 
-    // 7. Stop the container using Docker.
+    // 7. Stop + remove the container using Docker.
     // Note: docker::stop_container uses run_capture (not run_stream), so SIGINT is not
     // forwarded to docker stop. Check interrupted flag after the call returns.
     progress::step("Stopping devcontainer...");
     if let Err(e) = docker::stop_container(&mount_point) {
         eprintln!("{e}");
         return exit_codes::RUNTIME_ERROR;
+    }
+    for container_id in docker::query_container_any(&mount_point) {
+        if let Err(e) = docker::remove_container(&container_id) {
+            eprintln!("{e}");
+            return exit_codes::RUNTIME_ERROR;
+        }
     }
 
     // 8. Unmount bindfs. If SIGINT arrived between steps 7 and 8 (or during unmount),

@@ -130,7 +130,7 @@ dcx down [--workspace-folder PATH]
 2. Resolve workspace; fail exit 2 if missing or is a managed path
 3. Compute mount point
 4. If no mount: print "nothing to do", exit 0 (idempotent)
-5. Stop running container (find by `devcontainer.local_folder` label)
+5. Stop and remove container (find by `devcontainer.local_folder` label; `docker stop` then `docker rm`)
 6. Unmount bindfs
 7. Remove mount directory
 8. On SIGINT during unmount: complete unmount before exit

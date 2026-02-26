@@ -23,6 +23,14 @@ assert_exit "down exits 0" 0 "$code"
 assert_dir_missing "mount directory removed after down" "$MOUNT_DIR"
 ! is_mounted "$MOUNT_DIR" && pass "mount not in mount table after down" || fail "mount still in mount table after down"
 
+# Container should be fully removed (not just stopped)
+RELAY_DIR=$(relay_dir_for "$WS")
+container_after=$(docker ps -a \
+    --filter "label=devcontainer.local_folder=$RELAY_DIR" \
+    --format "{{.ID}}" 2>/dev/null || true)
+[ -z "$container_after" ] && pass "container fully removed after down" \
+    || fail "container still in docker ps -a after down: $container_after"
+
 # --- Idempotent: no mount found ---
 echo "--- idempotent no-mount ---"
 WS2=$(make_workspace)

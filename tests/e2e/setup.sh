@@ -127,7 +127,8 @@ assert_dir_missing() {
 
 # Track workspaces created during this test session so we can clean them up individually.
 # This avoids using dcx clean --all which would affect other concurrent workspaces.
-declare -a TRACKED_WORKSPACES=()
+# Uses a temp file (persists across subshells) instead of a bash array (lost in subshells).
+_CLEANUP_LIST=$(mktemp)
 
 # Create a minimal devcontainer workspace in a new temp dir.
 # Prints the path to the created workspace.
@@ -141,7 +142,7 @@ make_workspace() {
     "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
 }
 EOF
-    TRACKED_WORKSPACES+=("$tmpdir")
+    echo "$tmpdir" >> "$_CLEANUP_LIST"
     echo "$tmpdir"
 }
 
@@ -177,14 +178,40 @@ is_mounted() {
 }
 
 # Clean up only the workspaces created by this test session.
-# Uses dcx down --workspace-folder for each tracked workspace (not dcx clean).
-# dcx down is safe: it only stops the container and unmounts the relay for the
-# specific workspace. It does NOT scan for orphaned mounts, does NOT run global
-# Docker image/container cleanup, and cannot affect other workspaces.
+# Operates directly on the relay dir (computed via relay_dir_for) so it works
+# even when the workspace dir has already been deleted.
+# Stops+removes containers via devcontainer.local_folder label, unmounts the relay
+# FUSE mount, removes the relay dir, and removes the runtime image (vsc-*-uid).
 e2e_cleanup() {
+    [ -f "$_CLEANUP_LIST" ] || return
     local ws
-    for ws in "${TRACKED_WORKSPACES[@]}"; do
-        "$DCX" down --workspace-folder "$ws" 2>/dev/null || true
-    done
-    TRACKED_WORKSPACES=()
+    while IFS= read -r ws; do
+        [ -n "$ws" ] || continue
+        local relay_dir relay_name
+        relay_dir=$(relay_dir_for "$ws")
+        relay_name=$(basename "$relay_dir" | tr '[:upper:]' '[:lower:]')
+
+        # Stop and remove containers via devcontainer.local_folder label
+        local cid
+        while IFS= read -r cid; do
+            [ -n "$cid" ] || continue
+            docker stop "$cid" 2>/dev/null || true
+            docker rm "$cid" 2>/dev/null || true
+        done < <(docker ps -a \
+            --filter "label=devcontainer.local_folder=$relay_dir" \
+            --format "{{.ID}}" 2>/dev/null || true)
+
+        # Unmount and remove the relay dir
+        if is_mounted "$relay_dir"; then
+            fusermount -u "$relay_dir" 2>/dev/null || true
+        fi
+        [ -d "$relay_dir" ] && rm -rf "$relay_dir" 2>/dev/null || true
+
+        # Remove runtime image (vsc-*-uid)
+        docker images --format "{{.Repository}}:{{.Tag}}" \
+            | grep "^vsc-${relay_name}-" \
+            | grep -- '-uid' \
+            | xargs -r docker rmi 2>/dev/null || true
+    done < "$_CLEANUP_LIST"
+    > "$_CLEANUP_LIST"
 }

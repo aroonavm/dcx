@@ -41,9 +41,9 @@ Tests that build the `dcx` binary and run it as a subprocess against controlled 
 
 Shell scripts that test the full mount → container → cleanup lifecycle. These are slow and require the full environment. Covers all behaviors that involve real bindfs mounts, Docker containers, and Colima interaction.
 
-**Isolation Guarantee:** E2E tests NEVER call `dcx clean`. Cleanup uses `dcx down --workspace-folder` per tracked workspace only.
+**Isolation Guarantee:** E2E tests NEVER call `dcx clean`. Cleanup uses `dcx down --workspace-folder` per tracked workspace only, followed by explicit removal of the workspace-specific runtime image (`vsc-*-uid`).
 
-**Why not `dcx clean`:** `dcx clean --workspace-folder` has global side effects beyond the target workspace — it scans ALL relay mounts for orphans and runs global Docker image cleanup. These can delete containers and mounts belonging to real workspaces running on the same system. `dcx down` is safe: it only stops the container and unmounts the relay for the specific workspace, nothing else.
+**Why not `dcx clean`:** `dcx clean --workspace-folder` has global side effects beyond the target workspace — it scans ALL relay mounts for orphans and runs global Docker image cleanup. These can delete containers and mounts belonging to real workspaces running on the same system. `dcx down` is safe: it only stops and removes the container and unmounts the relay for the specific workspace, nothing else.
 
 **`dcx clean` is tested exclusively in Layer 2** (Rust integration tests) with isolated temporary HOME directories.
 
@@ -51,6 +51,8 @@ Shell scripts that test the full mount → container → cleanup lifecycle. Thes
 - `setup.sh` unconditionally unsets `DCX_DEVCONTAINER_CONFIG_PATH` so the host shell's config path cannot leak into tests and cause negative tests (tests that expect `dcx up` to fail) to unexpectedly succeed. Tests that specifically test env-var behaviour must set it explicitly.
 - Tests never use `ls -d "${RELAY}"/dcx-* | head/tail/wc` to reason about relay state, because pre-existing user workspaces pollute the count. Instead, use `relay_dir_for "$WS"` (defined in `setup.sh`) to compute the exact relay directory for a specific workspace. This helper mirrors `naming.rs` exactly (sanitize + SHA256 hash).
 - Assertions about "No active workspaces" are replaced with workspace-specific checks (e.g., assert the relay dir for `$WS` is absent).
+- Workspace tracking uses a temp file (`$_CLEANUP_LIST`) instead of a bash array, because array modifications inside subshells are lost. `make_workspace` (called via command substitution) appends workspace paths to the file, making them visible to the parent shell's `e2e_cleanup` function.
+- `e2e_cleanup` directly stops/removes containers via the `devcontainer.local_folder` Docker label, unmounts the relay FUSE dir, and removes the runtime image (`vsc-*-uid`) by name pattern. It does **not** call `dcx down`, so it works even when the workspace dir has already been deleted.
 
 **Guard:** `require_e2e_deps` — skips if Colima, Docker, bindfs, or devcontainer CLI is missing.
 
@@ -59,7 +61,7 @@ Shell scripts that test the full mount → container → cleanup lifecycle. Thes
 ```
 tests/
   ├── e2e/
-  │   ├── setup.sh              # Common setup/teardown helpers (uses dcx down for cleanup)
+  │   ├── setup.sh              # Common setup/teardown helpers (workspace tracking + cleanup)
   │   ├── test_dcx_up.sh
   │   ├── test_dcx_exec.sh
   │   ├── test_dcx_down.sh
