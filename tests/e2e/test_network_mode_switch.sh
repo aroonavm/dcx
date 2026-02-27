@@ -20,7 +20,10 @@ mkdir -p "${WORKSPACE_DIR}/.devcontainer"
 cat > "${WORKSPACE_DIR}/.devcontainer/devcontainer.json" << 'EOF'
 {
   "image": "busybox:latest",
-  "remoteUser": "root"
+  "remoteUser": "root",
+  "runArgs": [
+    "--label", "dcx.network-mode=${localEnv:DCX_NETWORK_MODE:minimal}"
+  ]
 }
 EOF
 
@@ -28,10 +31,10 @@ echo "Test 1: Bring up with network mode restricted"
 "$DCX" up --workspace-folder "${WORKSPACE_DIR}" --network restricted
 
 # Verify container has the restricted network mode label
-CONTAINER_ID=$(docker ps -a --filter "label=devcontainer.local_folder=$(cat << INNER
-${WORKSPACE_DIR}
-INNER
-)" --format "{{.ID}}" | head -1)
+# The container is labeled with the relay mount path (devcontainer.local_folder),
+# so we need to compute that path to search for the container.
+RELAY_DIR=$(relay_dir_for "${WORKSPACE_DIR}")
+CONTAINER_ID=$(docker ps -a --filter "label=devcontainer.local_folder=${RELAY_DIR}" --format "{{.ID}}" | head -1)
 test -n "${CONTAINER_ID}" || {
   echo "FAIL: No container found after "$DCX" up"
   exit 1
@@ -49,10 +52,7 @@ echo "Test 2: Normal down (mount exists)"
 "$DCX" down --workspace-folder "${WORKSPACE_DIR}"
 
 # Verify container is removed
-RUNNING=$(docker ps -a --filter "label=devcontainer.local_folder=$(cat << INNER
-${WORKSPACE_DIR}
-INNER
-)" --format "{{.ID}}" | wc -l)
+RUNNING=$(docker ps -a --filter "label=devcontainer.local_folder=${RELAY_DIR}" --format "{{.ID}}" | wc -l)
 test "${RUNNING}" -eq 0 || {
   echo "FAIL: Container still exists after "$DCX" down"
   exit 1
@@ -64,10 +64,7 @@ echo "Test 3: Bring up with new network mode (open)"
 "$DCX" up --workspace-folder "${WORKSPACE_DIR}" --network open
 
 # Verify new container has the open network mode label (not the old restricted one)
-CONTAINER_ID=$(docker ps -a --filter "label=devcontainer.local_folder=$(cat << INNER
-${WORKSPACE_DIR}
-INNER
-)" --format "{{.ID}}" | head -1)
+CONTAINER_ID=$(docker ps -a --filter "label=devcontainer.local_folder=${RELAY_DIR}" --format "{{.ID}}" | head -1)
 test -n "${CONTAINER_ID}" || {
   echo "FAIL: No container found after second "$DCX" up"
   exit 1
