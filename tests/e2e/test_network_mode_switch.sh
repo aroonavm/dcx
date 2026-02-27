@@ -1,12 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# Test: Network mode enforcement across dcx down/up cycles
+# Test: Network mode enforcement across "$DCX" down/up cycles
 # Verifies that:
-# 1. dcx up --network restricted creates a container with the restricted mode
-# 2. dcx down stops and removes the container
-# 3. dcx up --network open creates a fresh container with the open mode (not restarting the old one)
-# 4. When FUSE mount disappears but container survives, dcx down still removes the container
+# 1. "$DCX" up --network restricted creates a container with the restricted mode
+# 2. "$DCX" down stops and removes the container
+# 3. "$DCX" up --network open creates a fresh container with the open mode (not restarting the old one)
+# 4. When FUSE mount disappears but container survives, "$DCX" down still removes the container
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${REPO_ROOT}/tests/e2e/setup.sh"
@@ -25,7 +25,7 @@ cat > "${WORKSPACE_DIR}/.devcontainer/devcontainer.json" << 'EOF'
 EOF
 
 echo "Test 1: Bring up with network mode restricted"
-dcx up --workspace-folder "${WORKSPACE_DIR}" --network restricted
+"$DCX" up --workspace-folder "${WORKSPACE_DIR}" --network restricted
 
 # Verify container has the restricted network mode label
 CONTAINER_ID=$(docker ps -a --filter "label=devcontainer.local_folder=$(cat << INNER
@@ -33,7 +33,7 @@ ${WORKSPACE_DIR}
 INNER
 )" --format "{{.ID}}" | head -1)
 test -n "${CONTAINER_ID}" || {
-  echo "FAIL: No container found after dcx up"
+  echo "FAIL: No container found after "$DCX" up"
   exit 1
 }
 
@@ -46,7 +46,7 @@ echo "PASS: Container has network mode 'restricted'"
 
 echo ""
 echo "Test 2: Normal down (mount exists)"
-dcx down --workspace-folder "${WORKSPACE_DIR}"
+"$DCX" down --workspace-folder "${WORKSPACE_DIR}"
 
 # Verify container is removed
 RUNNING=$(docker ps -a --filter "label=devcontainer.local_folder=$(cat << INNER
@@ -54,14 +54,14 @@ ${WORKSPACE_DIR}
 INNER
 )" --format "{{.ID}}" | wc -l)
 test "${RUNNING}" -eq 0 || {
-  echo "FAIL: Container still exists after dcx down"
+  echo "FAIL: Container still exists after "$DCX" down"
   exit 1
 }
-echo "PASS: Container removed after dcx down"
+echo "PASS: Container removed after "$DCX" down"
 
 echo ""
 echo "Test 3: Bring up with new network mode (open)"
-dcx up --workspace-folder "${WORKSPACE_DIR}" --network open
+"$DCX" up --workspace-folder "${WORKSPACE_DIR}" --network open
 
 # Verify new container has the open network mode label (not the old restricted one)
 CONTAINER_ID=$(docker ps -a --filter "label=devcontainer.local_folder=$(cat << INNER
@@ -69,7 +69,7 @@ ${WORKSPACE_DIR}
 INNER
 )" --format "{{.ID}}" | head -1)
 test -n "${CONTAINER_ID}" || {
-  echo "FAIL: No container found after second dcx up"
+  echo "FAIL: No container found after second "$DCX" up"
   exit 1
 }
 
@@ -81,11 +81,11 @@ test "${NETWORK_MODE}" = "open" || {
 echo "PASS: Container has network mode 'open' (not restarted old restricted container)"
 
 # Clean up
-dcx down --workspace-folder "${WORKSPACE_DIR}"
+"$DCX" down --workspace-folder "${WORKSPACE_DIR}"
 
 echo ""
 echo "Test 4: FUSE crash scenario (container survives, mount gone)"
-dcx up --workspace-folder "${WORKSPACE_DIR}" --network restricted
+"$DCX" up --workspace-folder "${WORKSPACE_DIR}" --network restricted
 
 # Get the relay mount point
 RELAY_DIR="${HOME}/.colima-mounts"
@@ -110,20 +110,20 @@ test -n "${CONTAINER_ID}" || {
 }
 
 echo ""
-echo "Test 5: dcx down removes the orphaned container (mount gone but container exists)"
+echo "Test 5: "$DCX" down removes the orphaned container (mount gone but container exists)"
 # This should NOT print "Nothing to do" — it should still stop and remove the container
-dcx down --workspace-folder "${WORKSPACE_DIR}" 2>&1 | grep -q "Nothing to do" && {
-  echo "FAIL: dcx down printed 'Nothing to do' when container existed without mount"
+"$DCX" down --workspace-folder "${WORKSPACE_DIR}" 2>&1 | grep -q "Nothing to do" && {
+  echo "FAIL: "$DCX" down printed 'Nothing to do' when container existed without mount"
   exit 1
 }
 
 # Verify container is now gone
 REMAINING=$(docker ps -a --filter "label=devcontainer.local_folder=${MOUNT_POINT}" --format "{{.ID}}" 2>/dev/null | wc -l)
 test "${REMAINING}" -eq 0 || {
-  echo "FAIL: Container still exists after dcx down (with missing mount)"
+  echo "FAIL: Container still exists after "$DCX" down (with missing mount)"
   exit 1
 }
-echo "PASS: dcx down removed orphaned container even when mount was gone"
+echo "PASS: "$DCX" down removed orphaned container even when mount was gone"
 
 echo ""
 echo "All network mode switch tests passed!"
