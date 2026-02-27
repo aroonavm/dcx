@@ -10,6 +10,8 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
 sha2 = "0.10"
 signal-hook = "0.3"
 

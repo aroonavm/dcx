@@ -53,6 +53,243 @@ fn json_escape(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
+/// Build a mount entry string for inclusion in the mounts array.
+/// Example: `source=/home/user/.claude,target=/home/user/.claude,type=bind`
+fn build_mount_entry(host_path: &Path, writable: bool) -> String {
+    let path_str = json_escape(&host_path.to_string_lossy());
+    let readonly = if writable { "" } else { ",readonly" };
+    format!(
+        "source={},target={},type=bind{}",
+        path_str, path_str, readonly
+    )
+}
+
+/// Build environment variable overrides for well-known apps (git, claude).
+/// Returns a vec of (key, value) pairs to inject into containerEnv.
+fn build_env_overrides(
+    mounts: &[crate::colima::ColimaMount],
+    home: &Path,
+) -> Vec<(String, String)> {
+    let mut vars = Vec::new();
+    for mount in mounts {
+        let expanded = crate::colima::expand_tilde(&mount.location, home);
+        if mount.location == "~/.gitconfig" {
+            vars.push((
+                "GIT_CONFIG_GLOBAL".to_string(),
+                expanded.to_string_lossy().into_owned(),
+            ));
+        }
+        if mount.location == "~/.claude" {
+            vars.push((
+                "CLAUDE_CONFIG_DIR".to_string(),
+                expanded.to_string_lossy().into_owned(),
+            ));
+        }
+    }
+    vars
+}
+
+/// Find the position of the `]` that closes the `[` at `open_pos` in `json`.
+/// Correctly skips brackets inside JSON string values.
+fn find_closing_bracket(json: &str, open_pos: usize) -> Option<usize> {
+    let mut depth = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, c) in json[open_pos..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if in_string {
+            match c {
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open_pos + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find the position of the `}` that closes the `{` at `open_pos` in `json`.
+/// Correctly skips braces inside JSON string values.
+fn find_closing_brace(json: &str, open_pos: usize) -> Option<usize> {
+    let mut depth = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, c) in json[open_pos..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if in_string {
+            match c {
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open_pos + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Check if a mount target path is already declared in base config JSON.
+/// Checks both the literal expanded path and the `${localEnv:HOME}/…` variable form.
+fn mount_target_in_base(path: &Path, base_json: &str, home: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    if base_json.contains(&format!("target={}", path_str)) {
+        return true;
+    }
+    if let Ok(rel) = path.strip_prefix(home) {
+        let var_form = format!("target=${{localEnv:HOME}}/{}", rel.display());
+        if base_json.contains(&var_form) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if an environment variable key is already present in the containerEnv section.
+pub fn env_key_in_container_env(key: &str, base_json: &str) -> bool {
+    let key_pattern = format!("\"{}\"", key);
+    if let Some(env_pos) = base_json.find("\"containerEnv\"")
+        && let Some(brace_start) = base_json[env_pos..].find('{')
+    {
+        let brace_abs = env_pos + brace_start;
+        if let Some(close_pos) = find_closing_brace(base_json, brace_abs) {
+            return base_json[brace_abs..=close_pos].contains(&key_pattern);
+        }
+    }
+    false
+}
+
+/// Inject mount entries into the mounts JSON array.
+/// If the array exists, appends before `]`. If absent, adds `"mounts": [...]` before `}`.
+/// Entries are properly quoted as JSON strings.
+fn inject_mounts(json: &str, entries: &[String]) -> String {
+    if entries.is_empty() {
+        return json.to_string();
+    }
+
+    // Quote each entry as a JSON string
+    let quoted_entries: Vec<String> = entries
+        .iter()
+        .map(|e| format!("\"{}\"", json_escape(e)))
+        .collect();
+
+    // Try to find an existing "mounts" array
+    if let Some(mounts_pos) = json.find("\"mounts\"")
+        && let Some(bracket_pos) = json[mounts_pos..].find('[')
+    {
+        let bracket_abs = mounts_pos + bracket_pos;
+        if let Some(close_pos) = find_closing_bracket(json, bracket_abs) {
+            let array_content = json[bracket_abs + 1..close_pos].trim();
+            let is_empty = array_content.is_empty();
+            let entries_str = quoted_entries.join(",");
+            let sep = if is_empty { "" } else { "," };
+            let mut result = json.to_string();
+            result.insert_str(close_pos, &format!("{sep}{entries_str}"));
+            return result;
+        }
+    }
+
+    // No "mounts" array found — add one before the outermost closing `}`
+    if let Some(last_brace) = json.rfind('}') {
+        let before = json[..last_brace].trim_end();
+        let needs_comma = !before.is_empty() && !before.ends_with(',') && before != "{";
+        let entries_str = quoted_entries.join(",");
+        let sep = if needs_comma { "," } else { "" };
+        let mut result = json.to_string();
+        result.insert_str(
+            last_brace,
+            &format!("{}\n  \"mounts\": [{}]\n", sep, entries_str),
+        );
+        return result;
+    }
+
+    json.to_string()
+}
+
+/// Inject environment variables into the containerEnv object.
+/// If a key already exists in containerEnv, skips it (doesn't override project settings).
+fn inject_env_vars(json: &str, vars: &[(String, String)]) -> String {
+    if vars.is_empty() {
+        return json.to_string();
+    }
+
+    let mut result = json.to_string();
+
+    // Try to find existing "containerEnv" object
+    if let Some(env_pos) = result.find("\"containerEnv\"") {
+        if let Some(brace_pos) = result[env_pos..].find('{') {
+            let brace_abs = env_pos + brace_pos;
+            if let Some(close_pos) = find_closing_brace(&result, brace_abs) {
+                let obj_content = result[brace_abs + 1..close_pos].trim().to_string();
+                let is_empty = obj_content.is_empty();
+
+                let mut added = Vec::new();
+                for (key, val) in vars {
+                    let key_pattern = format!("\"{}\"", key);
+                    // Scope duplicate check to the containerEnv object only
+                    if !obj_content.contains(&key_pattern) {
+                        let val_escaped = json_escape(val);
+                        added.push(format!("\"{}\":\"{}\"", key, val_escaped));
+                    }
+                }
+
+                if !added.is_empty() {
+                    let entries_str = added.join(",");
+                    let sep = if is_empty { "" } else { "," };
+                    result.insert_str(close_pos, &format!("{}{}", sep, entries_str));
+                }
+                return result;
+            }
+        }
+    } else {
+        // No "containerEnv" object — add one before the outermost closing `}`
+        if let Some(last_brace) = result.rfind('}') {
+            let before = result[..last_brace].trim_end();
+            let needs_comma = !before.is_empty() && !before.ends_with(',') && before != "{";
+            let entries: Vec<String> = vars
+                .iter()
+                .map(|(k, v)| format!("\"{}\":\"{}\"", k, json_escape(v)))
+                .collect();
+            let entries_str = entries.join(",");
+            let sep = if needs_comma { "," } else { "" };
+            result.insert_str(
+                last_brace,
+                &format!("{}\n  \"containerEnv\":{{ {} }}\n", sep, entries_str),
+            );
+        }
+    }
+
+    result
+}
+
 /// Generate the override-config JSON that remaps workspaceFolder and workspaceMount
 /// to the original workspace path (standalone, 2-field form for fallback).
 fn generate_override_config(relay_path: &Path, original_path: &Path) -> String {
@@ -64,8 +301,8 @@ fn generate_override_config(relay_path: &Path, original_path: &Path) -> String {
     )
 }
 
-/// Generate a merged override-config by injecting workspaceFolder and workspaceMount
-/// into the base devcontainer.json before the final `}`.
+/// Generate a merged override-config by injecting workspaceFolder, workspaceMount,
+/// and optional mounts and environment variables into the base devcontainer.json.
 ///
 /// This preserves all original fields (e.g., image, build, dockerFile) so the result
 /// is a complete, valid devcontainer.json. Falls back to the standalone 2-field form
@@ -74,6 +311,8 @@ pub fn generate_merged_override_config(
     base_jsonc: &str,
     relay_path: &Path,
     workspace: &Path,
+    extra_mounts: &[String],
+    extra_env: &[(String, String)],
 ) -> String {
     let clean = docker::strip_jsonc_comments(base_jsonc);
     let clean = clean.trim();
@@ -84,14 +323,20 @@ pub fn generate_merged_override_config(
             let needs_comma = !before.is_empty() && !before.ends_with(',') && before != "{";
             let relay_str = json_escape(&relay_path.to_string_lossy());
             let ws_str = json_escape(&workspace.to_string_lossy());
-            format!(
+            // Build the complete merged JSON (with closing `}`), then inject extras.
+            // inject_mounts / inject_env_vars use rfind('}') which correctly finds
+            // the outermost `}` in the complete document.
+            let mut result = format!(
                 "{}{}\n  \"workspaceMount\": \"source={},target={},type=bind,consistency=delegated\",\n  \"workspaceFolder\": \"{}\"\n}}\n",
                 before,
                 if needs_comma { ",\n" } else { "\n" },
                 relay_str,
                 ws_str,
                 ws_str
-            )
+            );
+            result = inject_mounts(&result, extra_mounts);
+            result = inject_env_vars(&result, extra_env);
+            result
         }
     }
 }
@@ -470,27 +715,68 @@ pub fn run_up(
     let mount_str = mount_point.to_string_lossy();
     let config_str = config.as_ref().map(|p| p.to_string_lossy().into_owned());
 
+    // Hoist base config reading so dedup can check it before building extra mounts/env.
+    let base_config_path = config
+        .clone()
+        .or_else(|| find_devcontainer_config(&workspace));
+    let base_config_read: Option<Result<String, std::io::Error>> =
+        base_config_path.as_ref().map(std::fs::read_to_string);
+    let base_json = base_config_read
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(String::as_str)
+        .unwrap_or("");
+
+    // Read colima.yaml and discover mounts to inject, deduplicating against base config.
+    let (extra_mounts, extra_env) = {
+        let colima_path = crate::colima::colima_config_path(home);
+        let mut mounts_to_inject = Vec::new();
+        let mut env_to_inject = Vec::new();
+
+        if let Ok(yaml_content) = std::fs::read_to_string(&colima_path) {
+            let colima_mounts = crate::colima::parse_colima_mounts(&yaml_content);
+            let filtered_mounts = crate::colima::filter_relay_mounts(colima_mounts);
+
+            for mount in &filtered_mounts {
+                let expanded = crate::colima::expand_tilde(&mount.location, home);
+                // Skip: host path missing, or target already declared in base config
+                if expanded.exists() && !mount_target_in_base(&expanded, base_json, home) {
+                    mounts_to_inject.push(build_mount_entry(&expanded, mount.writable));
+                }
+            }
+
+            // Only inject env vars when the host path exists and key not already in base config
+            for (key, val) in build_env_overrides(&filtered_mounts, home) {
+                let val_path = std::path::Path::new(&val);
+                if val_path.exists() && !env_key_in_container_env(&key, base_json) {
+                    env_to_inject.push((key, val));
+                }
+            }
+        }
+
+        (mounts_to_inject, env_to_inject)
+    };
+
     // Create override-config JSON to remap workspaceFolder and workspaceMount
     // to the original workspace path inside the container.
     let override_config = match TempFile::new() {
         Ok(temp_file) => {
-            // Try to read the base devcontainer.json and generate a merged config
-            let base_config_path = config
-                .clone()
-                .or_else(|| find_devcontainer_config(&workspace));
-            let json_content = if let Some(ref path) = base_config_path {
-                match std::fs::read_to_string(path) {
-                    Ok(base) => generate_merged_override_config(&base, &mount_point, &workspace),
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: Could not read base config at {}, falling back to standalone mode: {e}",
-                            path.display()
-                        );
-                        generate_override_config(&mount_point, &workspace)
-                    }
+            let json_content = match base_config_read.as_ref() {
+                Some(Ok(base)) => generate_merged_override_config(
+                    base,
+                    &mount_point,
+                    &workspace,
+                    &extra_mounts,
+                    &extra_env,
+                ),
+                Some(Err(e)) => {
+                    eprintln!(
+                        "Warning: Could not read base config at {}, falling back to standalone mode: {e}",
+                        base_config_path.as_ref().unwrap().display()
+                    );
+                    generate_override_config(&mount_point, &workspace)
                 }
-            } else {
-                generate_override_config(&mount_point, &workspace)
+                None => generate_override_config(&mount_point, &workspace),
             };
 
             if let Err(e) = std::fs::write(temp_file.path(), &json_content) {
@@ -730,6 +1016,160 @@ mod tests {
         );
     }
 
+    // --- build_mount_entry ---
+
+    #[test]
+    fn build_mount_entry_writable() {
+        let path = Path::new("/home/user/.claude");
+        let entry = build_mount_entry(path, true);
+        assert!(entry.contains("source=/home/user/.claude"));
+        assert!(entry.contains("target=/home/user/.claude"));
+        assert!(entry.contains("type=bind"));
+        assert!(!entry.contains("readonly"));
+    }
+
+    #[test]
+    fn build_mount_entry_readonly() {
+        let path = Path::new("/home/user/.gitconfig");
+        let entry = build_mount_entry(path, false);
+        assert!(entry.contains("source=/home/user/.gitconfig"));
+        assert!(entry.contains("target=/home/user/.gitconfig"));
+        assert!(entry.contains("type=bind"));
+        assert!(entry.contains("readonly"));
+    }
+
+    #[test]
+    fn build_mount_entry_escapes_special_chars() {
+        let path = Path::new("/home/user/path\"with\\quotes");
+        let entry = build_mount_entry(path, true);
+        assert!(entry.contains("\\\""));
+        assert!(entry.contains("\\\\"));
+    }
+
+    // --- build_env_overrides ---
+
+    #[test]
+    fn build_env_overrides_includes_git_config() {
+        let mounts = vec![crate::colima::ColimaMount {
+            location: "~/.gitconfig".to_string(),
+            writable: false,
+        }];
+        let home = Path::new("/home/user");
+        let vars = build_env_overrides(&mounts, home);
+
+        let git_var = vars.iter().find(|(k, _)| k == "GIT_CONFIG_GLOBAL");
+        assert!(git_var.is_some());
+        assert_eq!(git_var.unwrap().1, "/home/user/.gitconfig");
+    }
+
+    #[test]
+    fn build_env_overrides_includes_claude_config() {
+        let mounts = vec![crate::colima::ColimaMount {
+            location: "~/.claude".to_string(),
+            writable: true,
+        }];
+        let home = Path::new("/home/user");
+        let vars = build_env_overrides(&mounts, home);
+
+        let claude_var = vars.iter().find(|(k, _)| k == "CLAUDE_CONFIG_DIR");
+        assert!(claude_var.is_some());
+        assert_eq!(claude_var.unwrap().1, "/home/user/.claude");
+    }
+
+    #[test]
+    fn build_env_overrides_empty_for_unknown_mounts() {
+        let mounts = vec![crate::colima::ColimaMount {
+            location: "~/.ssh".to_string(),
+            writable: true,
+        }];
+        let home = Path::new("/home/user");
+        let vars = build_env_overrides(&mounts, home);
+        assert_eq!(vars.len(), 0);
+    }
+
+    // --- inject_mounts ---
+
+    #[test]
+    fn inject_mounts_appends_to_existing_array() {
+        let json = r#"{"mounts":[]}"#;
+        let entries = vec!["entry1".to_string(), "entry2".to_string()];
+        let result = inject_mounts(json, &entries);
+        assert!(result.contains("entry1"));
+        assert!(result.contains("entry2"));
+    }
+
+    #[test]
+    fn inject_mounts_creates_new_array_when_absent() {
+        let json = r#"{"image":"ubuntu"}"#;
+        let entries = vec!["entry1".to_string()];
+        let result = inject_mounts(json, &entries);
+        assert!(result.contains("\"mounts\""));
+        assert!(result.contains("entry1"));
+    }
+
+    #[test]
+    fn inject_mounts_no_op_on_empty_entries() {
+        let json = r#"{"image":"ubuntu"}"#;
+        let result = inject_mounts(json, &[]);
+        assert_eq!(result, json);
+    }
+
+    #[test]
+    fn inject_mounts_adds_comma_for_non_empty_array() {
+        let json = r#"{"mounts":["existing"]}"#;
+        let entries = vec!["new".to_string()];
+        let result = inject_mounts(json, &entries);
+        // Should have a comma between existing entry and new entry
+        assert!(result.contains("\"existing\",\"new\""), "got: {result}");
+    }
+
+    // --- inject_env_vars ---
+
+    #[test]
+    fn inject_env_vars_appends_to_existing_object() {
+        let json = r#"{"containerEnv":{}}"#;
+        let vars = vec![("KEY".to_string(), "value".to_string())];
+        let result = inject_env_vars(json, &vars);
+        assert!(result.contains("KEY"));
+        assert!(result.contains("value"));
+    }
+
+    #[test]
+    fn inject_env_vars_creates_new_object_when_absent() {
+        let json = r#"{"image":"ubuntu"}"#;
+        let vars = vec![("KEY".to_string(), "value".to_string())];
+        let result = inject_env_vars(json, &vars);
+        assert!(result.contains("\"containerEnv\""));
+        assert!(result.contains("KEY"));
+        assert!(result.contains("value"));
+    }
+
+    #[test]
+    fn inject_env_vars_no_op_on_empty_vars() {
+        let json = r#"{"image":"ubuntu"}"#;
+        let result = inject_env_vars(json, &[]);
+        assert_eq!(result, json);
+    }
+
+    #[test]
+    fn inject_env_vars_skips_existing_keys() {
+        let json = r#"{"containerEnv":{"KEY":"oldvalue"}}"#;
+        let vars = vec![("KEY".to_string(), "newvalue".to_string())];
+        let result = inject_env_vars(json, &vars);
+        // Should not inject because KEY already exists
+        assert!(result.contains("oldvalue"));
+        assert!(!result.contains("newvalue"));
+    }
+
+    #[test]
+    fn inject_env_vars_escapes_special_chars() {
+        let json = r#"{"image":"ubuntu"}"#;
+        let vars = vec![("KEY".to_string(), "value\"with\\quotes".to_string())];
+        let result = inject_env_vars(json, &vars);
+        assert!(result.contains("\\\""));
+        assert!(result.contains("\\\\"));
+    }
+
     // --- generate_merged_override_config ---
 
     #[test]
@@ -737,7 +1177,7 @@ mod tests {
         let base = r#"{ "name": "My Dev", "build": { "dockerfile": "Dockerfile" }, "customizations": {} }"#;
         let relay = Path::new("/tmp/relay");
         let ws = Path::new("/home/user/project");
-        let result = generate_merged_override_config(base, relay, ws);
+        let result = generate_merged_override_config(base, relay, ws, &[], &[]);
 
         // Original fields must be preserved
         assert!(
@@ -773,7 +1213,7 @@ mod tests {
         let base = r#"{ "image": "ubuntu:22.04" }"#;
         let relay = Path::new("/tmp/relay");
         let ws = Path::new("/home/user/project");
-        let result = generate_merged_override_config(base, relay, ws);
+        let result = generate_merged_override_config(base, relay, ws, &[], &[]);
 
         assert!(result.contains("\"workspaceMount\": \"source=/tmp/relay,target=/home/user/project,type=bind,consistency=delegated\""), "workspaceMount incorrect: {result}");
         assert!(
@@ -787,7 +1227,7 @@ mod tests {
         let base = r#"{ "image": "ubuntu:22.04" }"#;
         let relay = Path::new("/tmp/relay");
         let ws = Path::new("/home/user/project");
-        let result = generate_merged_override_config(base, relay, ws);
+        let result = generate_merged_override_config(base, relay, ws, &[], &[]);
 
         // After the "image" field, there should be a comma before "workspaceMount"
         assert!(
@@ -808,7 +1248,7 @@ mod tests {
         "#;
         let relay = Path::new("/tmp/relay");
         let ws = Path::new("/home/user/project");
-        let result = generate_merged_override_config(base, relay, ws);
+        let result = generate_merged_override_config(base, relay, ws, &[], &[]);
 
         // Original fields must be preserved
         assert!(
@@ -846,7 +1286,7 @@ mod tests {
         let base = "";
         let relay = Path::new("/tmp/relay");
         let ws = Path::new("/home/user/project");
-        let result = generate_merged_override_config(base, relay, ws);
+        let result = generate_merged_override_config(base, relay, ws, &[], &[]);
 
         // Should fall back to standalone form (2 fields only)
         assert!(
@@ -867,10 +1307,164 @@ mod tests {
         let base = r#"{ "image": "ubuntu:22.04" }"#;
         let relay = Path::new("/tmp/relay\\with\\backslash");
         let ws = Path::new("/home/user/project\"quoted");
-        let result = generate_merged_override_config(base, relay, ws);
+        let result = generate_merged_override_config(base, relay, ws, &[], &[]);
 
         // Backslashes and quotes must be escaped
         assert!(result.contains("\\\\"), "backslashes not escaped: {result}");
         assert!(result.contains("\\\""), "quotes not escaped: {result}");
+    }
+
+    #[test]
+    fn merged_override_config_injects_mounts_into_nested_config() {
+        // Reproduces Issue 3: nested JSON like full/devcontainer.json must not corrupt
+        let base =
+            r#"{ "name": "dev", "customizations": { "vscode": { "settings": { "a": 1 } } } }"#;
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/home/user/project");
+        let mounts =
+            vec!["source=/home/user/.claude,target=/home/user/.claude,type=bind".to_string()];
+        let result = generate_merged_override_config(base, relay, ws, &mounts, &[]);
+
+        // All top-level fields must still be present
+        assert!(
+            result.contains("\"customizations\""),
+            "customizations missing: {result}"
+        );
+        assert!(
+            result.contains("\"workspaceFolder\""),
+            "workspaceFolder missing: {result}"
+        );
+        // The mount must appear in a top-level "mounts" array, not nested inside settings
+        assert!(
+            result.contains("\"mounts\""),
+            "mounts key missing: {result}"
+        );
+        assert!(result.contains(".claude"), "mount path missing: {result}");
+        // Verify the JSON ends with a single closing brace (document not corrupted)
+        let trimmed = result.trim();
+        assert!(trimmed.ends_with('}'), "must end with }}: {result}");
+    }
+
+    #[test]
+    fn merged_override_config_injects_env_into_nested_config() {
+        // Env injection must also land at the top level, not inside nested objects
+        let base =
+            r#"{ "name": "dev", "customizations": { "vscode": { "settings": { "a": 1 } } } }"#;
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/home/user/project");
+        let env = vec![(
+            "GIT_CONFIG_GLOBAL".to_string(),
+            "/home/user/.gitconfig".to_string(),
+        )];
+        let result = generate_merged_override_config(base, relay, ws, &[], &env);
+
+        assert!(
+            result.contains("\"containerEnv\""),
+            "containerEnv missing: {result}"
+        );
+        assert!(
+            result.contains("GIT_CONFIG_GLOBAL"),
+            "env var missing: {result}"
+        );
+        let trimmed = result.trim();
+        assert!(trimmed.ends_with('}'), "must end with }}: {result}");
+    }
+
+    // --- find_closing_bracket / find_closing_brace ---
+
+    #[test]
+    fn find_closing_bracket_ignores_brackets_in_strings() {
+        // The `]` inside the string value must not prematurely close the outer array
+        // Positions: [=0 "=1 v=2 a=3 l=4 ]=5(skip) u=6 e=7 "=8 ,=9 " "=10 "=11 o=12 t=13 h=14 e=15 r=16 "=17 ]=18
+        let json = r#"["val]ue", "other"]more"#;
+        let pos = find_closing_bracket(json, 0);
+        assert_eq!(
+            pos,
+            Some(18),
+            "should find closing ] at position 18, got {pos:?}"
+        );
+    }
+
+    #[test]
+    fn find_closing_brace_ignores_braces_in_strings() {
+        // {=0 "=1 k=2 e=3 y=4 "=5 :=6 "=7 v=8 a=9 l=10 }=11(skip) u=12 e=13 "=14 ,=15 "=16 k=17 2=18 "=19 :=20 "=21 v=22 2=23 "=24 }=25
+        let json = r#"{"key":"val}ue","k2":"v2"}"#;
+        let pos = find_closing_brace(json, 0);
+        assert_eq!(pos, Some(25), "should find closing }} at end, got {pos:?}");
+    }
+
+    #[test]
+    fn find_closing_bracket_handles_escaped_quote_in_string() {
+        // \" is an escaped quote; the scanner must stay in-string
+        // ["val\"still-in-string]", "other"]end
+        // [=0 "=1 v=2 a=3 l=4 \=5 "=6(escaped) s=7...]=21(in-string,skip) "=22 ,=23 " "=24 "=25 o=26 t=27 h=28 e=29 r=30 "=31 ]=32(wait, let me recount)
+        // Bytes: [ " v a l \ " s t i l l - i n - s t r i n g ] " ,   " o t h e r " ]
+        //        0 1 2 3 4 5 6 7 8 9...                         22 23 24 25 26...   33
+        let json = r#"["val\"still-in-string]", "other"]end"#;
+        let pos = find_closing_bracket(json, 0);
+        assert_eq!(pos, Some(33), "got {pos:?}");
+    }
+
+    // --- mount_target_in_base ---
+
+    #[test]
+    fn mount_target_in_base_finds_literal_path() {
+        let json =
+            r#"{"mounts":["source=/home/user/.claude,target=/home/user/.claude,type=bind"]}"#;
+        let home = Path::new("/home/user");
+        let path = Path::new("/home/user/.claude");
+        assert!(mount_target_in_base(path, json, home));
+    }
+
+    #[test]
+    fn mount_target_in_base_finds_localenv_home_form() {
+        let json = r#"{"mounts":["source=${localEnv:HOME}/.claude,target=${localEnv:HOME}/.claude,type=bind"]}"#;
+        let home = Path::new("/home/user");
+        let path = Path::new("/home/user/.claude");
+        assert!(mount_target_in_base(path, json, home));
+    }
+
+    #[test]
+    fn mount_target_in_base_returns_false_when_absent() {
+        let json = r#"{"mounts":["source=/other,target=/other,type=bind"]}"#;
+        let home = Path::new("/home/user");
+        let path = Path::new("/home/user/.claude");
+        assert!(!mount_target_in_base(path, json, home));
+    }
+
+    // --- env_key_in_container_env ---
+
+    #[test]
+    fn env_key_in_container_env_finds_existing_key() {
+        let json = r#"{"containerEnv":{"GIT_CONFIG_GLOBAL":"/home/user/.gitconfig"}}"#;
+        assert!(env_key_in_container_env("GIT_CONFIG_GLOBAL", json));
+    }
+
+    #[test]
+    fn env_key_in_container_env_returns_false_when_absent() {
+        let json = r#"{"containerEnv":{"OTHER_KEY":"value"}}"#;
+        assert!(!env_key_in_container_env("GIT_CONFIG_GLOBAL", json));
+    }
+
+    #[test]
+    fn env_key_in_container_env_does_not_match_outside_container_env() {
+        // "GIT_CONFIG_GLOBAL" appears as a value in another field — must not match
+        let json = r#"{"description":"value of GIT_CONFIG_GLOBAL is set","containerEnv":{}}"#;
+        assert!(!env_key_in_container_env("GIT_CONFIG_GLOBAL", json));
+    }
+
+    #[test]
+    fn inject_env_vars_does_not_false_positive_on_key_outside_container_env() {
+        // Key appears in a description string outside containerEnv; must still inject
+        let json = r#"{"note":"GIT_CONFIG_GLOBAL docs","containerEnv":{}}"#;
+        let vars = vec![(
+            "GIT_CONFIG_GLOBAL".to_string(),
+            "/home/user/.gitconfig".to_string(),
+        )];
+        let result = inject_env_vars(json, &vars);
+        assert!(
+            result.contains("\"GIT_CONFIG_GLOBAL\":"),
+            "should inject even though key appears in description: {result}"
+        );
     }
 }

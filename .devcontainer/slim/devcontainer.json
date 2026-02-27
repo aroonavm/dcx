@@ -22,8 +22,14 @@
         }
     },
     "remoteUser": "dev",
+    "mounts": [
+        "source=${localEnv:HOME}/.claude,target=${localEnv:HOME}/.claude,type=bind",
+        "source=${localEnv:HOME}/.gitconfig,target=${localEnv:HOME}/.gitconfig,type=bind,readonly"
+    ],
     "containerEnv": {
-        "RUST_BACKTRACE": "1"
+        "RUST_BACKTRACE": "1",
+        "CLAUDE_CONFIG_DIR": "${localEnv:HOME}/.claude",
+        "GIT_CONFIG_GLOBAL": "${localEnv:HOME}/.gitconfig"
     },
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
     "workspaceFolder": "/workspace"

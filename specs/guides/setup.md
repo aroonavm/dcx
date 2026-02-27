@@ -46,6 +46,8 @@ Edit the Colima config file:
 mounts:
   - location: ~/.claude      # If you use Claude Code locally
     writable: true
+  - location: ~/.gitconfig   # Git configuration
+    writable: false
   - location: ~/.colima-mounts
     writable: true
 ```
@@ -61,11 +63,15 @@ disk: 100GiB
 mounts:
   - location: ~/.claude
     writable: true
+  - location: ~/.gitconfig
+    writable: false
   - location: ~/.colima-mounts
     writable: true
 
 # ... other config
 ```
+
+> **Auto-Injection:** `dcx` automatically reads your `colima.yaml` mounts and makes them available inside containers at their original host paths. No need to add them to each project's `devcontainer.json`! For standard applications (git, Claude Code), `dcx` injects environment variables (`GIT_CONFIG_GLOBAL`, `CLAUDE_CONFIG_DIR`) so they work correctly.
 
 ### 3. Restart Colima
 

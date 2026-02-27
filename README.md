@@ -48,6 +48,24 @@ dcx up --workspace-folder ~/project-b       # Uses env var config
 dcx up --workspace-folder ~/project-c --config /other/config.json  # Flag overrides env var
 ```
 
+### Git and Claude Config in Containers
+
+Add these two mounts to your Colima config file (`~/.config/colima/default/colima.yaml` on Linux, `~/.colima/default/colima.yaml` on macOS):
+
+```yaml
+mounts:
+  - location: ~/.gitconfig
+    writable: false
+  - location: ~/.claude
+    writable: true
+  - location: ~/.colima-mounts
+    writable: true
+```
+
+`dcx` reads this file at startup and automatically injects any listed mounts (except `~/.colima-mounts` itself) into every container it starts. For `~/.gitconfig` and `~/.claude`, it also sets `GIT_CONFIG_GLOBAL` and `CLAUDE_CONFIG_DIR` so the tools find their config at the right path.
+
+This means git identity and Claude login are available in every container without any per-project configuration.
+
 ### Network Isolation
 
 Control network access per container with `--network`:

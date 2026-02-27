@@ -2,6 +2,7 @@ mod categorize;
 mod clean;
 mod cli;
 mod cmd;
+mod colima;
 mod completions;
 mod docker;
 mod doctor;
