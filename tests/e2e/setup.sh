@@ -241,6 +241,12 @@ e2e_cleanup() {
             | xargs -r docker rmi 2>/dev/null || true
     done < "$_CLEANUP_LIST"
     > "$_CLEANUP_LIST"
+
+    # Remove any intermediate base images created during tests (dcx-base:dcx-*)
+    # These are created by devcontainer during the build but not tied to a specific relay_name
+    docker images --format "{{.Repository}}:{{.Tag}}" \
+        | grep "^dcx-base:dcx-" \
+        | xargs -r docker rmi 2>/dev/null || true
 }
 
 # --- Validation (after all helpers are defined) ---
