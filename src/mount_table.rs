@@ -310,4 +310,11 @@ mod tests {
         // Only two octal digits after backslash: condition i+3 < len fails.
         assert_eq!(unescape_proc_field("path\\04"), "path\\04");
     }
+
+    #[test]
+    fn unescape_proc_field_decodes_octal_at_end_of_string() {
+        // \040 (space) as the final 4 bytes: i+3 == len-1, which is < len, so it decodes.
+        // Pins the fence-post: i+3 must be strictly less than len to be a valid index.
+        assert_eq!(unescape_proc_field("path\\040"), "path ");
+    }
 }

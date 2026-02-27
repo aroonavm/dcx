@@ -9,7 +9,7 @@ use crate::docker;
 use crate::exit_codes;
 use crate::format::{self, CleanEntry};
 use crate::mount_table;
-use crate::naming::{mount_name, relay_dir};
+use crate::naming::{mount_name, relay_dir, scan_relay};
 use crate::platform;
 use crate::progress;
 use crate::signals;
@@ -63,26 +63,6 @@ pub fn confirm_prompt(entries: &[(String, String, String)]) -> String {
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────────────
-
-/// Scan `relay` for all `dcx-*` subdirectories and return their sorted paths.
-fn scan_relay(relay: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(relay) else {
-        return vec![];
-    };
-    let mut dirs: Vec<PathBuf> = entries
-        .filter_map(|e| {
-            let e = e.ok()?;
-            let name = e.file_name();
-            if name.to_string_lossy().starts_with("dcx-") {
-                Some(e.path())
-            } else {
-                None
-            }
-        })
-        .collect();
-    dirs.sort();
-    dirs
-}
 
 /// Unmount `mount_point` using the platform-appropriate unmount command.
 fn do_unmount(mount_point: &Path) -> Result<(), String> {
@@ -769,42 +749,6 @@ mod tests {
         assert!(out.contains("abc123"), "got: {out}");
     }
 
-    // --- scan_one ---
-
-    // --- scan_relay ---
-
-    #[test]
-    fn scan_relay_nonexistent_dir_returns_empty() {
-        let result = scan_relay(Path::new("/tmp/dcx-test-nonexistent-relay-99999999"));
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn scan_relay_filters_dcx_prefix_only() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("dcx-project-a1b2c3d4")).unwrap();
-        std::fs::create_dir(dir.path().join("dcx-other-e5f6g7h8")).unwrap();
-        std::fs::create_dir(dir.path().join("not-dcx-dir")).unwrap();
-        std::fs::File::create(dir.path().join("some-file")).unwrap();
-        let result = scan_relay(dir.path());
-        assert_eq!(result.len(), 2, "only dcx- dirs should be included");
-        assert!(
-            result
-                .iter()
-                .all(|p| p.file_name().unwrap().to_string_lossy().starts_with("dcx-"))
-        );
-    }
-
-    #[test]
-    fn scan_relay_returns_sorted_paths() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("dcx-z-project-ffffffff")).unwrap();
-        std::fs::create_dir(dir.path().join("dcx-a-project-00000000")).unwrap();
-        let result = scan_relay(dir.path());
-        assert_eq!(result.len(), 2);
-        assert!(result[0] < result[1], "results must be sorted");
-    }
-
     // --- categorize_mount_state ---
 
     #[test]
@@ -823,25 +767,5 @@ mod tests {
         // Directory exists on filesystem but is not in the mount table.
         assert_eq!(categorize_mount_state(dir.path(), false), "empty dir");
         assert_eq!(categorize_mount_state(dir.path(), true), "empty dir");
-    }
-
-    #[test]
-    fn scan_one_no_base_image_tag_without_purge() {
-        // Without purge, scan_one should not check for base image tags.
-        let fake_mount = PathBuf::from("/tmp/dcx-nonexistent-00000000");
-        let plan = scan_one(&fake_mount, false);
-        assert!(
-            !plan.has_base_image_tag,
-            "without purge, has_base_image_tag should be false"
-        );
-    }
-
-    #[test]
-    fn scan_one_nonexistent_mount_is_empty_dir() {
-        let fake_mount = PathBuf::from("/tmp/dcx-nonexistent-00000000");
-        let plan = scan_one(&fake_mount, false);
-        assert_eq!(plan.state, "empty dir");
-        assert!(!plan.is_mounted);
-        assert!(plan.container_ids.is_empty());
     }
 }

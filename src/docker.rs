@@ -810,6 +810,14 @@ mod tests {
     }
 
     #[test]
+    fn extract_image_field_ignores_imagename_key() {
+        // "imageName" must not be matched instead of the exact "image" key.
+        // The quoted key pattern "\"image\"" does not appear inside "\"imageName\"".
+        let json = r#"{ "imageName": "wrong", "image": "correct:tag" }"#;
+        assert_eq!(extract_image_field(json), Some("correct:tag".to_string()));
+    }
+
+    #[test]
     fn strip_jsonc_comments_removes_line_comments() {
         let input = "{\n  // this is a comment\n  \"key\": \"value\"\n}";
         let result = strip_jsonc_comments(input);

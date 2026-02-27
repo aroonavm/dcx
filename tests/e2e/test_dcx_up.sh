@@ -24,27 +24,23 @@ is_mounted "$WS_RELAY" && pass "mount is active in mount table" || fail "mount n
 
 # --- Idempotent reuse ---
 echo "--- idempotent reuse ---"
-RELAY_SNAPSHOT_BEFORE=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
 code=0
 "$DCX" up --workspace-folder "$WS" 2>/dev/null || code=$?
 assert_exit "second up exits 0" 0 "$code"
-RELAY_SNAPSHOT_AFTER=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
-[ "$RELAY_SNAPSHOT_BEFORE" = "$RELAY_SNAPSHOT_AFTER" ] && \
-    pass "only one dcx-* entry after two ups" || \
-    fail "relay changed after idempotent up — before: $(echo "$RELAY_SNAPSHOT_BEFORE" | xargs -r basename) after: $(echo "$RELAY_SNAPSHOT_AFTER" | xargs -r basename)"
+# The same relay dir must still exist and be mounted — idempotent, no duplicate entry.
+assert_dir_exists "relay dir unchanged after second up" "$(relay_dir_for "$WS")"
+is_mounted "$(relay_dir_for "$WS")" && pass "relay mount healthy after second up" || fail "relay mount gone after idempotent up"
 
 # --- Dry-run: no side effects ---
 echo "--- dry-run ---"
 WS2=$(make_workspace)
-RELAY_SNAPSHOT_BEFORE=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
 dry_out=$("$DCX" up --dry-run --workspace-folder "$WS2" 2>/dev/null)
 dry_code=$?
 assert_exit "dry-run exits 0" 0 "$dry_code"
 assert_contains "dry-run shows Would mount" "$dry_out" "Would mount:"
 assert_contains "dry-run shows Would run" "$dry_out" "Would run:"
-RELAY_SNAPSHOT_AFTER=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
-[ "$RELAY_SNAPSHOT_BEFORE" = "$RELAY_SNAPSHOT_AFTER" ] && \
-    pass "dry-run creates no mount" || fail "dry-run created a mount"
+# Dry-run must not create a relay dir for WS2.
+assert_dir_missing "dry-run creates no mount" "$(relay_dir_for "$WS2")"
 rm -rf "$WS2"
 
 # --- Rollback on devcontainer failure ---
@@ -58,14 +54,12 @@ cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'
 }
 EOF
 
-RELAY_SNAPSHOT_BEFORE=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
 fail_code=0
 fail_out=$("$DCX" up --workspace-folder "$WS3" --config "$WS3/.devcontainer/devcontainer.json" 2>&1) || fail_code=$?
 assert_exit "rollback: up exits 1" 1 "$fail_code"
 assert_contains "rollback prints message" "$fail_out" "Mount rolled back."
-RELAY_SNAPSHOT_AFTER=$(ls -d "${RELAY}"/dcx-* 2>/dev/null | sort)
-[ "$RELAY_SNAPSHOT_BEFORE" = "$RELAY_SNAPSHOT_AFTER" ] && \
-    pass "rollback: no leftover mount" || fail "rollback left a mount behind"
+# Rollback must remove the relay dir for WS3 — no leftover mount.
+assert_dir_missing "rollback: no leftover mount" "$(relay_dir_for "$WS3")"
 rm -rf "$WS3"
 
 # --- Recursive mount guard exits 2 ---

@@ -1,47 +1,31 @@
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use crate::categorize::{MountStatus, categorize};
 use crate::docker;
 use crate::exit_codes;
 use crate::format::{StatusRow, format_status_table};
 use crate::mount_table;
-use crate::naming::relay_dir;
+use crate::naming::{relay_dir, scan_relay};
 use crate::platform;
 use crate::progress;
 
 /// Human-readable state label for a dcx mount entry.
 ///
+/// `is_mounted` should be `is_fuse_mounted && is_accessible` (the caller's
+/// combined health check). Delegates to `categorize` so label and categorization
+/// logic cannot drift apart.
+///
 /// - Mounted and has a container → `"running"`
 /// - Mounted but no container    → `"orphaned"`
 /// - Not mounted                 → `"stale mount"`
 pub fn mount_state_label(is_mounted: bool, has_container: bool) -> &'static str {
-    match (is_mounted, has_container) {
-        (true, true) => "running",
-        (true, false) => "orphaned",
-        (false, _) => "stale mount",
+    match categorize(is_mounted, is_mounted, has_container) {
+        MountStatus::Active => "running",
+        MountStatus::Orphaned => "orphaned",
+        MountStatus::Stale | MountStatus::Empty => "stale mount",
     }
-}
-
-/// Scan `relay` for all `dcx-*` subdirectories and return their sorted paths.
-fn scan_relay(relay: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(relay) else {
-        return vec![];
-    };
-    let mut dirs: Vec<PathBuf> = entries
-        .filter_map(|e| {
-            let e = e.ok()?;
-            let name = e.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with("dcx-") {
-                Some(e.path())
-            } else {
-                None
-            }
-        })
-        .collect();
-    dirs.sort();
-    dirs
 }
 
 /// Scan all dcx-managed mounts, query their state, and print the status table.
@@ -123,39 +107,5 @@ mod tests {
     fn label_stale_ignores_container_flag() {
         // When not mounted, the has_container flag is irrelevant — always "stale mount".
         assert_eq!(mount_state_label(false, true), "stale mount");
-    }
-
-    // --- scan_relay ---
-
-    #[test]
-    fn scan_relay_nonexistent_dir_returns_empty() {
-        let result = scan_relay(Path::new("/tmp/dcx-test-status-nonexistent-relay"));
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn scan_relay_filters_dcx_prefix_only() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("dcx-project-a1b2c3d4")).unwrap();
-        std::fs::create_dir(dir.path().join("not-dcx-dir")).unwrap();
-        let result = scan_relay(dir.path());
-        assert_eq!(result.len(), 1, "only dcx- dirs should be included");
-        assert!(
-            result[0]
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("dcx-")
-        );
-    }
-
-    #[test]
-    fn scan_relay_returns_sorted_paths() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("dcx-z-project-ffffffff")).unwrap();
-        std::fs::create_dir(dir.path().join("dcx-a-project-00000000")).unwrap();
-        let result = scan_relay(dir.path());
-        assert_eq!(result.len(), 2);
-        assert!(result[0] < result[1], "results must be sorted");
     }
 }

@@ -36,6 +36,27 @@ pub fn relay_dir(home: &Path) -> PathBuf {
     home.join(".colima-mounts")
 }
 
+/// Scan `relay` for all `dcx-*` subdirectories and return their sorted paths.
+pub(crate) fn scan_relay(relay: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(relay) else {
+        return vec![];
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .filter_map(|e| {
+            let e = e.ok()?;
+            let name = e.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with("dcx-") {
+                Some(e.path())
+            } else {
+                None
+            }
+        })
+        .collect();
+    dirs.sort();
+    dirs
+}
+
 /// Return true if `path` is inside a dcx-managed mount (`<relay>/dcx-*`).
 pub fn is_dcx_managed_path(path: &Path, relay: &Path) -> bool {
     if let Ok(rel) = path.strip_prefix(relay)
@@ -221,5 +242,39 @@ mod tests {
     fn is_dcx_managed_false_for_relay_itself() {
         let relay = Path::new("/home/user/.colima-mounts");
         assert!(!is_dcx_managed_path(relay, relay));
+    }
+
+    // --- scan_relay ---
+
+    #[test]
+    fn scan_relay_nonexistent_dir_returns_empty() {
+        let result = scan_relay(Path::new("/tmp/dcx-test-scan-relay-nonexistent"));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn scan_relay_filters_dcx_prefix_only() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dcx-project-a1b2c3d4")).unwrap();
+        std::fs::create_dir(dir.path().join("dcx-other-e5f6g7h8")).unwrap();
+        std::fs::create_dir(dir.path().join("not-dcx-dir")).unwrap();
+        std::fs::File::create(dir.path().join("some-file")).unwrap();
+        let result = scan_relay(dir.path());
+        assert_eq!(result.len(), 2, "only dcx- dirs should be included");
+        assert!(
+            result
+                .iter()
+                .all(|p| p.file_name().unwrap().to_string_lossy().starts_with("dcx-"))
+        );
+    }
+
+    #[test]
+    fn scan_relay_returns_sorted_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dcx-z-project-ffffffff")).unwrap();
+        std::fs::create_dir(dir.path().join("dcx-a-project-00000000")).unwrap();
+        let result = scan_relay(dir.path());
+        assert_eq!(result.len(), 2);
+        assert!(result[0] < result[1], "results must be sorted");
     }
 }

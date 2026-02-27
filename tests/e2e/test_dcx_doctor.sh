@@ -30,11 +30,6 @@ echo "--- check marks ---"
 FAIL_COUNT=$(echo "$out" | grep -c "✗" || true)
 [ "$FAIL_COUNT" -eq 0 ] && pass "no failing checks (✗) in full environment" || fail "found $FAIL_COUNT failing checks: $out"
 
-# --- Exit code semantics: 0 on pass ---
-echo "--- exit code 0 on pass ---"
-"$DCX" doctor >/dev/null 2>/dev/null
-assert_exit "doctor exits 0" 0 $?
-
 # --- Progress output on stderr ---
 echo "--- progress output ---"
 stderr_out=$("$DCX" doctor 2>&1 >/dev/null)

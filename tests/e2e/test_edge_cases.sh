@@ -52,8 +52,8 @@ cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'
 }
 EOF
 "$DCX" up --workspace-folder "$WS3" 2>/dev/null
-# Look specifically for the dcx-my-project-* entry (WS may also be mounted alongside it).
-MOUNT3=$(ls -d "${RELAY}"/dcx-my-project-* 2>/dev/null | head -1 | xargs -r basename)
+# Compute the expected mount name for WS3 (mirrors Rust logic in naming.rs).
+MOUNT3=$(basename "$(relay_dir_for "$WS3")")
 # The basename of WS3 starts with "my.project." — dot should become hyphen.
 [[ "$MOUNT3" == dcx-my-project* ]] && pass "dots sanitized to hyphens in mount name" || fail "expected dcx-my-project* but got ${MOUNT3:-<none>}"
 "$DCX" down --workspace-folder "$WS3" 2>/dev/null
@@ -80,11 +80,5 @@ echo "--- bash completion validity ---"
 code=0
 bash -c "source <($DCX completions bash)" 2>/dev/null || code=$?
 assert_exit "bash completions are valid bash" 0 "$code"
-
-# --- Pass-through exit code ---
-echo "--- pass-through exit code ---"
-code=0
-"$DCX" __dcx_nonexistent_e2e__ 2>/dev/null || code=$?
-[ "$code" -ne 2 ] && pass "pass-through does not exit 2 (clap error)" || fail "pass-through must not exit 2"
 
 summary

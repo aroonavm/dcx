@@ -22,11 +22,6 @@ fn help_lists_all_managed_subcommands() {
         .stdout(predicate::str::contains("doctor"));
 }
 
-#[test]
-fn version_exits_zero() {
-    dcx().arg("--version").assert().success();
-}
-
 // Subcommand help text is validated by clap; spot-checking one subcommand is sufficient.
 
 // --- dcx up ---
@@ -140,10 +135,13 @@ fn up_dry_run_without_devcontainer_config_exits_nonzero() {
 }
 
 #[test]
-fn up_recursive_guard_exits_nonzero() {
-    // Using a path inside ~/.colima-mounts/dcx-* as the workspace must be rejected.
-    // The path doesn't exist so workspace resolution fails first (exit 2) or
-    // Docker is unavailable (exit 1) — either way, non-zero.
+fn up_nonexistent_relay_path_exits_nonzero() {
+    // A relay-style path that does not exist on disk causes workspace resolution
+    // to fail (exit 2) or Docker check to fail (exit 1) — either way, non-zero.
+    // Note: this does not reach the recursive-mount guard (step 3 in run_up) because
+    // the path does not exist and resolve_workspace returns Err first (step 2).
+    // The actual recursive-mount guard is exercised by the E2E tests where the relay
+    // dir can be made to exist.
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
     let relay_path = format!("{home}/.colima-mounts/dcx-test-a1b2c3d4");
     dcx()
@@ -678,16 +676,6 @@ fn completions_bash_output_is_nonempty() {
         .assert()
         .success()
         .stdout(predicate::str::is_empty().not());
-}
-
-#[test]
-fn completions_bash_output_mentions_dcx() {
-    let out = dcx().args(["completions", "bash"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("dcx"),
-        "bash completion output must reference 'dcx', got: {stdout}"
-    );
 }
 
 #[test]

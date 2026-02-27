@@ -15,22 +15,7 @@ use crate::progress;
 use crate::signals;
 use crate::workspace::{find_devcontainer_config, resolve_workspace};
 
-// ── RAII helpers ──────────────────────────────────────────────────────────────
-
-/// RAII guard that deletes a file on drop.
-struct TempFile(PathBuf);
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
 // ── Pure functions ────────────────────────────────────────────────────────────
-
-/// Escape a string for use as a JSON string value (handles `\` and `"`).
-fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
 
 /// Abbreviate `path` with `~` if it starts with `home`.
 pub fn tilde_path(path: &Path, home: &Path) -> String {
@@ -401,36 +386,17 @@ pub fn run_up(
     // If Ctrl+C is pressed during devcontainer up, devcontainer (same process group)
     // is killed, run_stream returns non-zero, and we roll back below.
     progress::step("Starting devcontainer...");
-    let mount_str = mount_point.to_string_lossy().into_owned();
-    let ws_str = workspace.to_string_lossy();
+    let mount_str = mount_point.to_string_lossy();
     let config_str = config.as_ref().map(|p| p.to_string_lossy().into_owned());
 
-    // Write a temp override config so the container mounts the workspace at its
-    // original host path rather than /workspace.  The source= uses the relay
-    // (Colima-visible) path; target= and workspaceFolder use the original path.
-    // The _override_guard RAII value deletes the file on every exit path.
-    let override_path = PathBuf::from(format!("/tmp/dcx-override-{}.json", std::process::id()));
-    let override_json = format!(
-        "{{\n  \"workspaceMount\": \"source={mount},target={ws},type=bind,consistency=delegated\",\n  \"workspaceFolder\": \"{ws}\"\n}}\n",
-        mount = json_escape(&mount_str),
-        ws = json_escape(&ws_str),
-    );
-    if let Err(e) = std::fs::write(&override_path, &override_json) {
-        if mounted_fresh {
-            rollback(&mount_point);
-        }
-        eprintln!("Failed to write override config: {e}");
-        return exit_codes::RUNTIME_ERROR;
-    }
-    let _override_guard = TempFile(override_path.clone());
-    let override_str = override_path.to_string_lossy().into_owned();
-
+    // Pass the relay mount path to devcontainer as the workspace folder.
+    // The relay mount is the only path that devcontainer can access (it's visible to Docker/Colima).
+    // devcontainer will read the devcontainer.json from the relay mount via the bindfs mount,
+    // so the config must be accessible there.
     let mut dc_args = vec![
         "up",
         "--workspace-folder",
-        &mount_str,
-        "--override-config",
-        &override_str,
+        mount_str.as_ref(),
     ];
     if let Some(ref s) = config_str {
         dc_args.push("--config");
@@ -466,29 +432,6 @@ pub fn run_up(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- json_escape ---
-
-    #[test]
-    fn json_escape_plain_path_is_unchanged() {
-        assert_eq!(json_escape("/home/user/myproject"), "/home/user/myproject");
-    }
-
-    #[test]
-    fn json_escape_backslash_is_doubled() {
-        assert_eq!(json_escape("C:\\Users\\project"), "C:\\\\Users\\\\project");
-    }
-
-    #[test]
-    fn json_escape_double_quote_is_backslash_escaped() {
-        assert_eq!(json_escape("/path/\"quoted\""), "/path/\\\"quoted\\\"");
-    }
-
-    #[test]
-    fn json_escape_backslash_before_quote_both_escaped() {
-        // Ordering matters: backslash must be replaced before quote to avoid double-escaping.
-        assert_eq!(json_escape("a\\\"b"), "a\\\\\\\"b");
-    }
 
     // --- tilde_path ---
 

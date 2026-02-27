@@ -49,7 +49,6 @@ trap 'e2e_cleanup; rm -rf "$WS" "$WS2"' EXIT
 out=$("$DCX" status 2>/dev/null)
 assert_contains "status shows first workspace" "$out" "$WS"
 assert_contains "status shows second workspace" "$out" "$WS2"
-RUNNING_COUNT=$(echo "$out" | grep -c "running" || true)
-[ "$RUNNING_COUNT" -ge 1 ] && pass "at least one running workspace shown" || fail "expected at least one running workspace"
+assert_contains "status shows WS2 as running" "$out" "running"
 
 summary
