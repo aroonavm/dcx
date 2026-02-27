@@ -2,6 +2,7 @@
 
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::process;
 
 use std::sync::atomic::Ordering;
 
@@ -15,7 +16,55 @@ use crate::progress;
 use crate::signals;
 use crate::workspace::{find_devcontainer_config, resolve_workspace};
 
-// ── Pure functions ────────────────────────────────────────────────────────────
+// ── RAII TempFile ─────────────────────────────────────────────────────────
+
+/// RAII guard for a temporary file. Automatically deletes on drop.
+struct TempFile {
+    path: PathBuf,
+}
+
+impl TempFile {
+    /// Create a new temp file and return its path.
+    fn new() -> Result<Self, String> {
+        let path = PathBuf::from(format!("/tmp/dcx-override-{}.json", process::id()));
+        Ok(TempFile { path })
+    }
+
+    /// Get the path to the temp file.
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+// ── JSON Helpers ──────────────────────────────────────────────────────────────
+
+/// Escape a string for JSON by replacing special characters.
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+/// Generate the override-config JSON that remaps workspaceFolder and workspaceMount
+/// to the original workspace path.
+fn generate_override_config(relay_path: &Path, original_path: &Path) -> String {
+    let relay_str = json_escape(&relay_path.to_string_lossy());
+    let original_str = json_escape(&original_path.to_string_lossy());
+    format!(
+        "{{\n  \"workspaceMount\": \"source={},target={},type=bind,consistency=delegated\",\n  \"workspaceFolder\": \"{}\"\n}}\n",
+        relay_str, original_str, original_str
+    )
+}
+
+// ── Pure functions ────────────────────────────────────────────────────────────────
 
 /// Abbreviate `path` with `~` if it starts with `home`.
 pub fn tilde_path(path: &Path, home: &Path) -> String {
@@ -389,16 +438,48 @@ pub fn run_up(
     let mount_str = mount_point.to_string_lossy();
     let config_str = config.as_ref().map(|p| p.to_string_lossy().into_owned());
 
+    // Create override-config JSON to remap workspaceFolder and workspaceMount
+    // to the original workspace path inside the container.
+    let override_config = match TempFile::new() {
+        Ok(temp_file) => {
+            let json_content = generate_override_config(&mount_point, &workspace);
+            if let Err(e) = std::fs::write(temp_file.path(), &json_content) {
+                eprintln!("Failed to write override config: {e}");
+                if mounted_fresh {
+                    rollback(&mount_point);
+                }
+                return exit_codes::RUNTIME_ERROR;
+            }
+            Some(temp_file)
+        }
+        Err(e) => {
+            eprintln!("Failed to create temp file: {e}");
+            if mounted_fresh {
+                rollback(&mount_point);
+            }
+            return exit_codes::RUNTIME_ERROR;
+        }
+    };
+
     // Pass the relay mount path to devcontainer as the workspace folder.
     // The relay mount is the only path that devcontainer can access (it's visible to Docker/Colima).
     // devcontainer will read the devcontainer.json from the relay mount via the bindfs mount,
     // so the config must be accessible there.
+    // The override-config then remaps workspaceFolder and workspaceMount to the original path.
     let mut dc_args = vec!["up", "--workspace-folder", mount_str.as_ref()];
+    let override_config_path: String;
+    if let Some(ref temp) = override_config {
+        override_config_path = temp.path().to_string_lossy().into_owned();
+        dc_args.push("--override-config");
+        dc_args.push(&override_config_path);
+    }
     if let Some(ref s) = config_str {
         dc_args.push("--config");
         dc_args.push(s.as_str());
     }
     let code = cmd::run_stream("devcontainer", &dc_args).unwrap_or(exit_codes::PREREQ_NOT_FOUND);
+    // Drop override_config to clean up temp file before continuing
+    drop(override_config);
 
     // 11. Roll back on failure (if we mounted this run) and return RUNTIME_ERROR.
     // This handles both normal devcontainer failures and Ctrl+C (SIGINT kills the child,

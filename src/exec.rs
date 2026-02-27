@@ -42,9 +42,11 @@ pub fn mount_not_found_error(workspace: &Path, mount_dir_exists: bool) -> String
 /// Build the argument list for `devcontainer exec`.
 ///
 /// Passes `--container-id` (reliable container lookup, bypasses config-hash
-/// resolution) and optionally `--config` to specify the devcontainer config.
+/// resolution), `--workspace-folder` (original workspace path), and optionally
+/// `--config` to specify the devcontainer config.
 pub fn build_exec_args(
     container_id: &str,
+    workspace_path: &Path,
     config: Option<&Path>,
     command: &[String],
 ) -> Vec<String> {
@@ -52,6 +54,8 @@ pub fn build_exec_args(
         "exec".to_string(),
         "--container-id".to_string(),
         container_id.to_string(),
+        "--workspace-folder".to_string(),
+        workspace_path.to_string_lossy().into_owned(),
     ];
     if let Some(cfg) = config {
         args.push("--config".to_string());
@@ -148,7 +152,7 @@ pub fn run_exec(
     // SIGINT is forwarded naturally to the child (same process group). No special handling needed.
     progress::step("Running exec in container...");
 
-    let args = build_exec_args(&container_id, config.as_deref(), &command);
+    let args = build_exec_args(&container_id, &workspace, config.as_deref(), &command);
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     cmd::run_stream("devcontainer", &args_str).unwrap_or(exit_codes::PREREQ_NOT_FOUND)
 }
@@ -182,15 +186,25 @@ mod tests {
 
     #[test]
     fn exec_args_includes_container_id() {
-        let args = build_exec_args("abc123", None, &[]);
+        let ws = Path::new("/home/user/myproject");
+        let args = build_exec_args("abc123", ws, None, &[]);
         let ci = args.iter().position(|a| a == "--container-id").unwrap();
         assert_eq!(args[ci + 1], "abc123");
     }
 
     #[test]
+    fn exec_args_includes_workspace_folder() {
+        let ws = Path::new("/home/user/myproject");
+        let args = build_exec_args("abc123", ws, None, &[]);
+        let wi = args.iter().position(|a| a == "--workspace-folder").unwrap();
+        assert_eq!(args[wi + 1], "/home/user/myproject");
+    }
+
+    #[test]
     fn exec_args_appends_command_after_separator() {
+        let ws = Path::new("/home/user/myproject");
         let cmd = vec!["bash".to_string(), "-c".to_string(), "echo hi".to_string()];
-        let args = build_exec_args("abc123", None, &cmd);
+        let args = build_exec_args("abc123", ws, None, &cmd);
         let sep = args.iter().position(|a| a == "--").unwrap();
         assert_eq!(args[sep + 1], "bash");
         assert_eq!(args[sep + 2], "-c");
@@ -199,21 +213,24 @@ mod tests {
 
     #[test]
     fn exec_args_no_separator_when_command_empty() {
-        let args = build_exec_args("abc123", None, &[]);
+        let ws = Path::new("/home/user/myproject");
+        let args = build_exec_args("abc123", ws, None, &[]);
         assert!(!args.contains(&"--".to_string()));
     }
 
     #[test]
     fn exec_args_includes_config_when_provided() {
+        let ws = Path::new("/home/user/myproject");
         let cfg = Path::new("/home/user/project/.devcontainer/devcontainer.json");
-        let args = build_exec_args("abc123", Some(cfg), &[]);
+        let args = build_exec_args("abc123", ws, Some(cfg), &[]);
         let ci = args.iter().position(|a| a == "--config").unwrap();
         assert_eq!(args[ci + 1], cfg.to_string_lossy().as_ref());
     }
 
     #[test]
     fn exec_args_no_config_flag_when_absent() {
-        let args = build_exec_args("abc123", None, &[]);
+        let ws = Path::new("/home/user/myproject");
+        let args = build_exec_args("abc123", ws, None, &[]);
         assert!(!args.contains(&"--config".to_string()));
     }
 

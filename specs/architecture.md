@@ -31,7 +31,7 @@ Host /home/user/myproject ──[bindfs]──> Host ~/.colima-mounts/dcx-myproj
                                               ↓ [Colima mount]
                                          VM ~/.colima-mounts/dcx-myproject-a1b2c3d4
                                               ↓ [Docker bind mount]
-                                         Container /workspaces/dcx-myproject-a1b2c3d4
+                                         Container /home/user/myproject
 ```
 
 **Technical Stack:**
@@ -86,7 +86,7 @@ dcx up [--workspace-folder PATH] [--config PATH] [--network MODE] [--dry-run] [-
 10. If mount exists: verify health + source matches (idempotent), else recover from stale
 11. If mount missing: create + mount with `bindfs --no-allow-other`
 12. If workspace not owned by user: warn + prompt (skip with `--yes`)
-13. Pass `--workspace-folder` → mount point (relay path, for `devcontainer.local_folder` label tracking); forward `--config` if provided
+13. Create override-config JSON mapping `workspaceMount` and `workspaceFolder` to the original workspace path. Pass `--workspace-folder` → mount point (relay path, for `devcontainer.local_folder` label tracking) and `--override-config` → override JSON. This keeps the container queryable by relay mount point while remapping the workspace inside the container to the original path. Forward `--config` if provided.
 13.5. Network mode enforcement: check if any existing containers have a mismatched `dcx.network-mode` label. If found, stop and remove them so `devcontainer up` creates a fresh container with the requested mode. Handles containers that survived `dcx down` for any reason (e.g., FUSE mount disappeared but container remained).
 14. Delegate to `devcontainer up` (devcontainer stamps container with label `dcx.network-mode=<mode>`)
 15. On failure: rollback (unmount + remove dir), exit 1
@@ -113,8 +113,8 @@ dcx exec [--workspace-folder PATH] [--config PATH] COMMAND [ARGS...]
 5. Verify mount exists + healthy
 6. Find running container by `devcontainer.local_folder` label on the relay mount point
 7. Print network mode (read from container label `dcx.network-mode`)
-8. Delegate to `devcontainer exec` with `--container-id` (reliable container lookup) and `--config` if provided
-9. The user's shell lands in the container's home directory (`/home/vscode` or similar, depending on `remoteUser` in devcontainer.json); workspace is accessible at the relay mount path
+8. Delegate to `devcontainer exec` with `--container-id` (reliable container lookup), `--workspace-folder` (original workspace path), and `--config` if provided
+9. The user's shell lands in the original workspace path (e.g., `/home/user/myproject`)
 10. Forward SIGINT to child process
 
 ---

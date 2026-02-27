@@ -58,14 +58,12 @@ rm -rf "$MOUNT_DIR"
 # Remount so subsequent tests can proceed.
 "$DCX" up --workspace-folder "$WS" 2>/dev/null
 
-# --- Working directory is accessible ---
+# --- Working directory is the original workspace ---
 echo "--- working directory ---"
 code=0
 cwd=$("$DCX" exec --workspace-folder "$WS" pwd 2>/dev/null) || code=$?
 assert_exit "exec pwd exits 0" 0 "$code"
-# The workspace is mounted inside the container, not at the original path,
-# so exec defaults to the container's home directory (/home/vscode).
-[ -n "$cwd" ] && pass "exec pwd returns a valid path" || fail "exec pwd returned empty"
+assert_eq "exec pwd is original workspace path" "$WS" "$cwd"
 
 # --- Progress output on stderr ---
 echo "--- progress output ---"
