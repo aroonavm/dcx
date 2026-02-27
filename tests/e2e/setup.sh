@@ -225,8 +225,12 @@ e2e_cleanup() {
             --format "{{.ID}}" 2>/dev/null || true)
 
         # Unmount and remove the relay dir
+        # Use non-interactive sudo (-n) to avoid prompting for password in automated tests.
+        # Try without sudo first (most common case), then with non-interactive sudo.
         if is_mounted "$relay_dir"; then
-            fusermount -u "$relay_dir" 2>/dev/null || true
+            fusermount -u "$relay_dir" 2>/dev/null || \
+            sudo -n fusermount -u "$relay_dir" 2>/dev/null || \
+            true
         fi
         [ -d "$relay_dir" ] && rm -rf "$relay_dir" 2>/dev/null || true
 
