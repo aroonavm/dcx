@@ -229,7 +229,7 @@ pub fn get_base_image_name(
 ///
 /// devcontainer.json uses JSONC format which allows comments. This ensures comment
 /// content is not mistaken for real JSON keys or values.
-fn strip_jsonc_comments(content: &str) -> String {
+pub fn strip_jsonc_comments(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
     let mut chars = content.chars().peekable();
     let mut in_string = false;

@@ -54,7 +54,7 @@ fn json_escape(s: &str) -> String {
 }
 
 /// Generate the override-config JSON that remaps workspaceFolder and workspaceMount
-/// to the original workspace path.
+/// to the original workspace path (standalone, 2-field form for fallback).
 fn generate_override_config(relay_path: &Path, original_path: &Path) -> String {
     let relay_str = json_escape(&relay_path.to_string_lossy());
     let original_str = json_escape(&original_path.to_string_lossy());
@@ -62,6 +62,38 @@ fn generate_override_config(relay_path: &Path, original_path: &Path) -> String {
         "{{\n  \"workspaceMount\": \"source={},target={},type=bind,consistency=delegated\",\n  \"workspaceFolder\": \"{}\"\n}}\n",
         relay_str, original_str, original_str
     )
+}
+
+/// Generate a merged override-config by injecting workspaceFolder and workspaceMount
+/// into the base devcontainer.json before the final `}`.
+///
+/// This preserves all original fields (e.g., image, build, dockerFile) so the result
+/// is a complete, valid devcontainer.json. Falls back to the standalone 2-field form
+/// if the base cannot be parsed.
+pub fn generate_merged_override_config(
+    base_jsonc: &str,
+    relay_path: &Path,
+    workspace: &Path,
+) -> String {
+    let clean = docker::strip_jsonc_comments(base_jsonc);
+    let clean = clean.trim();
+    match clean.rfind('}') {
+        None => generate_override_config(relay_path, workspace),
+        Some(last_brace) => {
+            let before = clean[..last_brace].trim_end();
+            let needs_comma = !before.is_empty() && !before.ends_with(',') && before != "{";
+            let relay_str = json_escape(&relay_path.to_string_lossy());
+            let ws_str = json_escape(&workspace.to_string_lossy());
+            format!(
+                "{}{}\n  \"workspaceMount\": \"source={},target={},type=bind,consistency=delegated\",\n  \"workspaceFolder\": \"{}\"\n}}\n",
+                before,
+                if needs_comma { ",\n" } else { "\n" },
+                relay_str,
+                ws_str,
+                ws_str
+            )
+        }
+    }
 }
 
 // ── Pure functions ────────────────────────────────────────────────────────────────
@@ -442,7 +474,25 @@ pub fn run_up(
     // to the original workspace path inside the container.
     let override_config = match TempFile::new() {
         Ok(temp_file) => {
-            let json_content = generate_override_config(&mount_point, &workspace);
+            // Try to read the base devcontainer.json and generate a merged config
+            let base_config_path = config
+                .clone()
+                .or_else(|| find_devcontainer_config(&workspace));
+            let json_content = if let Some(ref path) = base_config_path {
+                match std::fs::read_to_string(path) {
+                    Ok(base) => generate_merged_override_config(&base, &mount_point, &workspace),
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Could not read base config at {}, falling back to standalone mode: {e}",
+                            path.display()
+                        );
+                        generate_override_config(&mount_point, &workspace)
+                    }
+                }
+            } else {
+                generate_override_config(&mount_point, &workspace)
+            };
+
             if let Err(e) = std::fs::write(temp_file.path(), &json_content) {
                 eprintln!("Failed to write override config: {e}");
                 if mounted_fresh {
@@ -678,5 +728,149 @@ mod tests {
             out.contains("dcx clean"),
             "missing dcx clean suggestion: {out}"
         );
+    }
+
+    // --- generate_merged_override_config ---
+
+    #[test]
+    fn merged_override_config_preserves_base_fields() {
+        let base = r#"{ "name": "My Dev", "build": { "dockerfile": "Dockerfile" }, "customizations": {} }"#;
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/home/user/project");
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // Original fields must be preserved
+        assert!(
+            result.contains("\"name\": \"My Dev\""),
+            "name field missing: {result}"
+        );
+        assert!(
+            result.contains("\"build\""),
+            "build field missing: {result}"
+        );
+        assert!(
+            result.contains("\"dockerfile\": \"Dockerfile\""),
+            "dockerfile missing: {result}"
+        );
+        assert!(
+            result.contains("\"customizations\""),
+            "customizations missing: {result}"
+        );
+
+        // New fields must be injected
+        assert!(
+            result.contains("\"workspaceMount\""),
+            "workspaceMount missing: {result}"
+        );
+        assert!(
+            result.contains("\"workspaceFolder\""),
+            "workspaceFolder missing: {result}"
+        );
+    }
+
+    #[test]
+    fn merged_override_config_injects_workspace_fields() {
+        let base = r#"{ "image": "ubuntu:22.04" }"#;
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/home/user/project");
+        let result = generate_merged_override_config(base, relay, ws);
+
+        assert!(result.contains("\"workspaceMount\": \"source=/tmp/relay,target=/home/user/project,type=bind,consistency=delegated\""), "workspaceMount incorrect: {result}");
+        assert!(
+            result.contains("\"workspaceFolder\": \"/home/user/project\""),
+            "workspaceFolder incorrect: {result}"
+        );
+    }
+
+    #[test]
+    fn merged_override_config_adds_comma_separator() {
+        let base = r#"{ "image": "ubuntu:22.04" }"#;
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/home/user/project");
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // After the "image" field, there should be a comma before "workspaceMount"
+        assert!(
+            result.contains("\"image\": \"ubuntu:22.04\","),
+            "comma separator missing after image field: {result}"
+        );
+    }
+
+    #[test]
+    fn merged_override_config_strips_jsonc_comments() {
+        let base = r#"
+{
+  // This is a comment
+  "image": "ubuntu:22.04",
+  /* block comment */
+  "customizations": {}
+}
+        "#;
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/home/user/project");
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // Original fields must be preserved
+        assert!(
+            result.contains("\"image\""),
+            "image field missing: {result}"
+        );
+        assert!(
+            result.contains("\"customizations\""),
+            "customizations missing: {result}"
+        );
+
+        // Injected fields must be present
+        assert!(
+            result.contains("\"workspaceMount\""),
+            "workspaceMount missing: {result}"
+        );
+        assert!(
+            result.contains("\"workspaceFolder\""),
+            "workspaceFolder missing: {result}"
+        );
+
+        // Comments must not appear in the result
+        assert!(
+            !result.contains("This is a comment"),
+            "line comment not stripped: {result}"
+        );
+        assert!(
+            !result.contains("block comment"),
+            "block comment not stripped: {result}"
+        );
+    }
+
+    #[test]
+    fn merged_override_config_falls_back_on_empty() {
+        let base = "";
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/home/user/project");
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // Should fall back to standalone form (2 fields only)
+        assert!(
+            result.contains("\"workspaceMount\""),
+            "workspaceMount missing: {result}"
+        );
+        assert!(
+            result.contains("\"workspaceFolder\""),
+            "workspaceFolder missing: {result}"
+        );
+        // Check that it's the 2-field JSON form
+        assert!(result.contains("{"), "missing opening brace: {result}");
+        assert!(result.contains("}"), "missing closing brace: {result}");
+    }
+
+    #[test]
+    fn merged_override_config_escapes_json_special_chars() {
+        let base = r#"{ "image": "ubuntu:22.04" }"#;
+        let relay = Path::new("/tmp/relay\\with\\backslash");
+        let ws = Path::new("/home/user/project\"quoted");
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // Backslashes and quotes must be escaped
+        assert!(result.contains("\\\\"), "backslashes not escaped: {result}");
+        assert!(result.contains("\\\""), "quotes not escaped: {result}");
     }
 }
