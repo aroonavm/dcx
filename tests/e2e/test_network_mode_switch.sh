@@ -93,7 +93,8 @@ MOUNT_POINT="${RELAY_DIR}/${MOUNT_NAME}"
 echo "Simulating FUSE crash by unmounting bindfs..."
 if ! fusermount -u "${MOUNT_POINT}" 2>/dev/null; then
   # Fallback to umount if fusermount not available
-  sudo umount "${MOUNT_POINT}" 2>/dev/null || true
+  # Use non-interactive sudo (-n) to avoid prompting for password in automated tests
+  sudo -n umount "${MOUNT_POINT}" 2>/dev/null || true
 fi
 
 # Verify mount is gone but container still exists
