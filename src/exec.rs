@@ -42,9 +42,7 @@ pub fn mount_not_found_error(workspace: &Path, mount_dir_exists: bool) -> String
 /// Build the argument list for `devcontainer exec`.
 ///
 /// Passes `--container-id` (reliable container lookup, bypasses config-hash
-/// resolution), `--workspace-folder` pointing to the original workspace path
-/// (so devcontainer lands the shell at the correct path inside the container),
-/// and optionally `--override-config` to inject the workspaceFolder setting.
+/// resolution) and optionally `--config` to specify the devcontainer config.
 pub fn build_exec_args(
     container_id: &str,
     config: Option<&Path>,
@@ -150,11 +148,7 @@ pub fn run_exec(
     // SIGINT is forwarded naturally to the child (same process group). No special handling needed.
     progress::step("Running exec in container...");
 
-    let args = build_exec_args(
-        &container_id,
-        config.as_deref(),
-        &command,
-    );
+    let args = build_exec_args(&container_id, config.as_deref(), &command);
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     cmd::run_stream("devcontainer", &args_str).unwrap_or(exit_codes::PREREQ_NOT_FOUND)
 }

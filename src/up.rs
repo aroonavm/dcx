@@ -393,11 +393,7 @@ pub fn run_up(
     // The relay mount is the only path that devcontainer can access (it's visible to Docker/Colima).
     // devcontainer will read the devcontainer.json from the relay mount via the bindfs mount,
     // so the config must be accessible there.
-    let mut dc_args = vec![
-        "up",
-        "--workspace-folder",
-        mount_str.as_ref(),
-    ];
+    let mut dc_args = vec!["up", "--workspace-folder", mount_str.as_ref()];
     if let Some(ref s) = config_str {
         dc_args.push("--config");
         dc_args.push(s.as_str());
