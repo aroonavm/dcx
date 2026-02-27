@@ -1,29 +1,25 @@
-# Fix: `dcx up` crashes with "missing image/dockerFile/dockerComposeFile"
+# Fix: `dcx exec` lands in wrong directory without override-config
 
-## Root Cause
-`devcontainer --override-config` **replaces** the entire base config, not merges. The temp file with only `workspaceMount` and `workspaceFolder` lacks required image source fields.
+## Context
+After fixing `dcx up` to merge override-config, `dcx exec` still landed in `/workspace`
+instead of the original workspace path. Root cause: override-config was only passed to
+`dcx up`, not to `dcx exec`.
 
-## Implementation
-1. [x] `src/docker.rs` — Make `strip_jsonc_comments` public
-2. [x] `src/up.rs` — Add `generate_merged_override_config` function
-3. [x] `src/up.rs` — Update `run_up` call site to read base config and use merged approach
-4. [x] Add unit tests for `generate_merged_override_config` (6 tests)
-5. [x] Run `make check` — all 196 unit + 32 integration tests pass
+## Solution
+Apply the same override-config approach to `dcx exec`:
+- Generate merged override-config (workspace remapping)
+- Pass to `devcontainer exec` via `--override-config` flag
+- User now lands in correct directory
 
-## Changes Summary
-- **src/docker.rs** (line 232): Made `strip_jsonc_comments` public for reuse
-- **src/up.rs** (lines 67-97): Added `generate_merged_override_config` that:
-  - Strips JSONC comments from base config
-  - Finds final `}` and injects workspaceMount + workspaceFolder before it
-  - Falls back to standalone 2-field form if base cannot be parsed
-- **src/up.rs** (lines 475-495): Updated `run_up` to:
-  - Read the base devcontainer.json (from --config or found in workspace)
-  - Call `generate_merged_override_config` with base content
-  - Fall back to standalone form with warning if read fails
-- **src/up.rs** (lines 731-846): Added 6 unit tests covering:
-  - Preservation of original fields
-  - Injection of workspace fields
-  - Comma separator insertion
-  - JSONC comment stripping
-  - Fallback on empty/invalid base
-  - JSON escaping of special characters
+## Changes Completed
+1. [x] src/exec.rs — Add TempFile, json_escape, generate_merged_override_config
+2. [x] src/exec.rs — Update build_exec_args to accept override_config_path
+3. [x] src/exec.rs — Update run_exec to generate and pass override-config
+4. [x] src/exec.rs — Add 2 new unit tests for override-config handling
+5. [x] Run make check — All 200 tests pass (198 unit + 32 CLI)
+
+## Testing
+✓ 12 exec unit tests (including 2 new)
+✓ 198 total unit tests
+✓ 32 CLI integration tests
+✓ All tests pass
