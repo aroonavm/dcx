@@ -155,4 +155,27 @@ mod tests {
         assert!(msg.contains("does not exist"), "got: {msg}");
         assert!(msg.contains("dcx clean"), "got: {msg}");
     }
+
+    // --- recursive mount guard logic ---
+    // NOTE: The guard in run_down (lines ~60-68) checks: is_dcx_managed_path(workspace, relay_dir).
+    // If the user tries to `dcx down` on a relay mount path (e.g. ~/.colima-mounts/dcx-foo-123),
+    // it should error.
+    // This logic is tested indirectly by E2E tests (test_dcx_exec.sh's recursive guard test).
+    // A unit test would be: assert!(is_dcx_managed_path(relay_mount_path, relay_dir)) → true,
+    // which is covered by naming.rs tests.
+    #[test]
+    fn recursive_guard_rejects_relay_mounted_path() {
+        use crate::naming::is_dcx_managed_path;
+        let relay = Path::new("/home/user/.colima-mounts");
+        let relay_mounted = Path::new("/home/user/.colima-mounts/dcx-foo-a1b2c3d4");
+        assert!(is_dcx_managed_path(relay_mounted, relay));
+    }
+
+    #[test]
+    fn recursive_guard_accepts_normal_workspace() {
+        use crate::naming::is_dcx_managed_path;
+        let relay = Path::new("/home/user/.colima-mounts");
+        let normal = Path::new("/home/user/myproject");
+        assert!(!is_dcx_managed_path(normal, relay));
+    }
 }

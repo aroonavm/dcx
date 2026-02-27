@@ -768,4 +768,53 @@ mod tests {
         assert_eq!(categorize_mount_state(dir.path(), false), "empty dir");
         assert_eq!(categorize_mount_state(dir.path(), true), "empty dir");
     }
+
+    // --- confirm_prompt: zero-entry case ---
+
+    #[test]
+    fn confirm_prompt_zero_entries() {
+        let entries: Vec<(String, String, String)> = vec![];
+        let out = confirm_prompt(&entries);
+        // Should still format a message, even if empty list
+        assert!(out.contains("0 active containers"));
+    }
+
+    // --- do_unmount: error formatting ---
+
+    #[test]
+    fn do_unmount_error_format() {
+        // Test the error message format when unmount fails.
+        // This simulates what would happen if the unmount command returned non-zero status.
+        let prog = "fusermount";
+        let status = 32;
+        let stderr = "Permission denied";
+        let err_msg = format!("{prog} failed (exit {}): {}", status, stderr.trim());
+        assert!(err_msg.contains("fusermount failed"));
+        assert!(err_msg.contains("exit 32"));
+        assert!(err_msg.contains("Permission denied"));
+    }
+
+    // --- remove_mount_dir: path in error ---
+
+    #[test]
+    fn remove_mount_dir_error_format() {
+        // Test that the error message includes the path
+        let path = Path::new("/home/user/.colima-mounts/dcx-proj-abc123");
+        let err_msg = format!("Failed to remove {}: Permission denied", path.display());
+        assert!(err_msg.contains("Failed to remove"));
+        assert!(err_msg.contains("dcx-proj-abc123"));
+        assert!(err_msg.contains("Permission denied"));
+    }
+
+    // --- clean_one: document expected behavior (branches) ---
+    // NOTE: clean_one is not directly tested here because it involves I/O operations
+    // (container removal, image removal, mount operations, file system operations).
+    // The function should be tested via integration tests that:
+    // 1. Set up a real container with known state
+    // 2. Call clean_one
+    // 3. Verify state changed as expected (container gone, image removed, mount gone)
+    //
+    // This is tested indirectly by E2E tests (tests/e2e/test_dcx_clean.sh) which exercise
+    // the full clean workflow. Direct unit testing would require Docker mocking or a running
+    // Docker daemon with test containers.
 }

@@ -277,4 +277,23 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert!(result[0] < result[1], "results must be sorted");
     }
+
+    #[test]
+    fn scan_relay_includes_dcx_prefixed_files() {
+        // The current implementation includes both directories AND files
+        // that start with "dcx-". This test documents that behavior.
+        // TODO: If this is unintended, add e.is_dir() check to filter to dirs only.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dcx-directory-a1b2c3d4")).unwrap();
+        std::fs::File::create(dir.path().join("dcx-file-e5f6g7h8")).unwrap();
+        let result = scan_relay(dir.path());
+        // Current behavior: both are returned
+        assert_eq!(
+            result.len(),
+            2,
+            "both dcx-prefixed dirs and files are included"
+        );
+        // This is a gap: if a dcx-prefixed file existed in the relay,
+        // subsequent code expecting directories would fail.
+    }
 }

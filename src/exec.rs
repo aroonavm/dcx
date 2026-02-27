@@ -394,4 +394,202 @@ mod tests {
         let msg = mount_not_found_error(ws, false);
         assert!(msg.contains("No mount found"), "got: {msg}");
     }
+
+    // --- json_escape ---
+
+    #[test]
+    fn json_escape_handles_backslash() {
+        let result = json_escape("path\\with\\backslash");
+        assert_eq!(result, "path\\\\with\\\\backslash");
+    }
+
+    #[test]
+    fn json_escape_handles_quotes() {
+        let result = json_escape("name\"with\"quotes");
+        assert_eq!(result, "name\\\"with\\\"quotes");
+    }
+
+    #[test]
+    fn json_escape_handles_newline() {
+        let result = json_escape("line1\nline2");
+        assert_eq!(result, "line1\\nline2");
+    }
+
+    #[test]
+    fn json_escape_handles_carriage_return() {
+        let result = json_escape("text\rmore");
+        assert_eq!(result, "text\\rmore");
+    }
+
+    #[test]
+    fn json_escape_handles_tab() {
+        let result = json_escape("tab\there");
+        assert_eq!(result, "tab\\there");
+    }
+
+    #[test]
+    fn json_escape_handles_mixed_special_chars() {
+        let result = json_escape("path\\with\"special\nchars\t&");
+        assert_eq!(result, "path\\\\with\\\"special\\nchars\\t&");
+    }
+
+    #[test]
+    fn json_escape_leaves_normal_chars_unchanged() {
+        let result = json_escape("/home/user/.claude");
+        assert_eq!(result, "/home/user/.claude");
+    }
+
+    // --- generate_override_config ---
+
+    #[test]
+    fn generate_override_config_creates_valid_json() {
+        let relay = Path::new("/home/user/.colima-mounts/dcx-proj-abc123");
+        let ws = Path::new("/home/user/myproject");
+        let result = generate_override_config(relay, ws);
+
+        assert!(result.contains("\"workspaceMount\""));
+        assert!(result.contains("\"workspaceFolder\""));
+        assert!(result.contains("source=/home/user/.colima-mounts/dcx-proj-abc123"));
+        assert!(result.contains("target=/home/user/myproject"));
+    }
+
+    #[test]
+    fn generate_override_config_has_correct_format() {
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/tmp/workspace");
+        let result = generate_override_config(relay, ws);
+
+        assert!(result.starts_with('{'));
+        assert!(result.ends_with("}\n"));
+        assert!(result.contains("\"workspaceMount\": \"source=/tmp/relay,target=/tmp/workspace,type=bind,consistency=delegated\""));
+        assert!(result.contains("\"workspaceFolder\": \"/tmp/workspace\""));
+    }
+
+    #[test]
+    fn generate_override_config_escapes_special_chars() {
+        let relay = Path::new("/path\\with\\backslash");
+        let ws = Path::new("/path\"with\"quotes");
+        let result = generate_override_config(relay, ws);
+
+        assert!(result.contains("\\\\"));
+        assert!(result.contains("\\\""));
+    }
+
+    // --- generate_merged_override_config ---
+
+    #[test]
+    fn merged_override_config_fallback_on_empty_base() {
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/tmp/workspace");
+        let result = generate_merged_override_config("", relay, ws);
+
+        // Should fall back to standalone 2-field form
+        assert!(result.contains("\"workspaceMount\""));
+        assert!(result.contains("\"workspaceFolder\""));
+        assert!(result.starts_with('{'));
+        assert!(result.ends_with("}\n"));
+    }
+
+    #[test]
+    fn merged_override_config_fallback_on_no_closing_brace() {
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/tmp/workspace");
+        let result = generate_merged_override_config("{\"image\":\"ubuntu\"", relay, ws);
+
+        // No closing brace found, should fall back
+        assert!(result.contains("\"workspaceMount\""));
+        assert!(result.contains("\"workspaceFolder\""));
+    }
+
+    #[test]
+    fn merged_override_config_merges_into_base() {
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/tmp/workspace");
+        let base = r#"{"image":"ubuntu:22.04","customizations":{}}"#;
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // Original fields must be preserved
+        assert!(result.contains("\"image\":\"ubuntu:22.04\""));
+        assert!(result.contains("\"customizations\""));
+
+        // New fields must be injected
+        assert!(result.contains("\"workspaceMount\""));
+        assert!(result.contains("\"workspaceFolder\""));
+    }
+
+    #[test]
+    fn merged_override_config_adds_comma_when_needed() {
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/tmp/workspace");
+        let base = r#"{"image":"ubuntu"}"#;
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // There should be a comma after "image" field before the workspace fields
+        assert!(result.contains("\"image\":\"ubuntu\","));
+    }
+
+    #[test]
+    fn merged_override_config_no_comma_when_base_empty_object() {
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/tmp/workspace");
+        let base = r#"{}"#;
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // Should not add comma for empty object
+        assert!(result.contains("\"workspaceMount\""));
+        assert!(result.contains("\"workspaceFolder\""));
+    }
+
+    #[test]
+    fn merged_override_config_strips_jsonc_comments() {
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/tmp/workspace");
+        let base = r#"
+{
+  // This is a comment
+  "image": "ubuntu"
+  /* block comment */
+}
+        "#;
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // Comments should be stripped
+        assert!(!result.contains("This is a comment"));
+        assert!(!result.contains("block comment"));
+
+        // Original fields should be preserved
+        assert!(result.contains("\"image\""));
+
+        // New fields should be present
+        assert!(result.contains("\"workspaceMount\""));
+    }
+
+    #[test]
+    fn merged_override_config_escapes_paths_with_special_chars() {
+        let relay = Path::new("/path\\with\\backslash");
+        let ws = Path::new("/path\"with\"quotes");
+        let base = r#"{"image":"ubuntu"}"#;
+        let result = generate_merged_override_config(base, relay, ws);
+
+        assert!(result.contains("\\\\"));
+        assert!(result.contains("\\\""));
+    }
+
+    #[test]
+    fn merged_override_config_preserves_nested_braces() {
+        let relay = Path::new("/tmp/relay");
+        let ws = Path::new("/tmp/workspace");
+        let base = r#"{"customizations":{"vscode":{"settings":{"a":1}}}}"#;
+        let result = generate_merged_override_config(base, relay, ws);
+
+        // All nested structure should be preserved
+        assert!(result.contains("\"customizations\""));
+        assert!(result.contains("\"vscode\""));
+        assert!(result.contains("\"settings\""));
+        assert!(result.contains("\"a\":1"));
+
+        // Must end with single closing brace (not corrupted)
+        let trimmed = result.trim();
+        assert!(trimmed.ends_with('}'));
+    }
 }

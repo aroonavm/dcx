@@ -563,4 +563,37 @@ mod tests {
         assert!(out.contains("(running)"), "got: {out}");
         assert!(out.contains("(orphaned)"), "got: {out}");
     }
+
+    #[test]
+    fn dry_run_multiple_container_ids_in_one_plan() {
+        // Ensure that when a single mount has multiple containers,
+        // all container IDs are formatted correctly.
+        let plans = vec![DryRunPlan {
+            mount_name: "dcx-project-a1b2c3d4".to_string(),
+            state: "running".to_string(),
+            container_ids: vec![
+                "abc123def456".to_string(),
+                "xyz789uvw012".to_string(),
+                "ghi345jkl678".to_string(),
+            ],
+            runtime_image_id: Some("sha256:abc".to_string()),
+            has_base_image_tag: false,
+            volumes: vec![],
+            is_mounted: true,
+        }];
+        let out = format_dry_run(&plans);
+        // All three container IDs should appear in the output
+        assert!(
+            out.contains("abc123def456"),
+            "first container ID missing: {out}"
+        );
+        assert!(
+            out.contains("xyz789uvw012"),
+            "second container ID missing: {out}"
+        );
+        assert!(
+            out.contains("ghi345jkl678"),
+            "third container ID missing: {out}"
+        );
+    }
 }
