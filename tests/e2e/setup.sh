@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+# Trap undefined function calls and command errors to ensure tests fail properly
+trap 'echo "ERROR: Command failed at line $LINENO"; exit 1' ERR
+
 # Prevent the host's DCX_DEVCONTAINER_CONFIG_PATH from leaking into tests.
 # Tests that need to test env-var behaviour set it explicitly themselves.
 unset DCX_DEVCONTAINER_CONFIG_PATH || true
@@ -56,23 +59,30 @@ PASS=0
 FAIL=0
 
 pass() {
-    echo "  PASS: $1"
+    local label="$1"
+    echo "  ✓ PASS: $label"
     ((PASS += 1))
 }
 
 fail() {
-    echo "  FAIL: $1"
+    local label="$1"
+    echo "  ✗ FAIL: $label"
     ((FAIL += 1))
-    # Print a stack trace to help locate the failing test.
-    local i=0
-    while caller $i; do ((i += 1)); done
+    # Print the failing line to help locate the issue
+    local caller_line
+    caller_line=$(caller 1 2>/dev/null | awk '{print $2":"$1}' || echo "unknown")
+    echo "         at $caller_line"
 }
 
 summary() {
     echo ""
-    echo "Results: ${PASS} passed, ${FAIL} failed"
-    if [ "${FAIL}" -gt 0 ]; then
-        exit 1
+    local total=$((PASS + FAIL))
+    if [ "${FAIL}" -eq 0 ]; then
+        echo "Results: ${PASS}/${total} passed ✓"
+        return 0
+    else
+        echo "Results: ${PASS}/${total} passed, ${FAIL} FAILED ✗"
+        return 1
     fi
 }
 
@@ -81,27 +91,29 @@ summary() {
 assert_exit() {
     local label="$1" expected="$2" actual="$3"
     if [ "$actual" -eq "$expected" ]; then
-        pass "$label (exit $actual)"
+        pass "$label (exit code: $actual)"
     else
-        fail "$label — expected exit $expected, got $actual"
+        fail "$label (expected exit $expected, got $actual)"
     fi
 }
 
 assert_contains() {
     local label="$1" haystack="$2" needle="$3"
     if [[ "$haystack" == *"$needle"* ]]; then
-        pass "$label (contains '$needle')"
+        pass "$label"
     else
-        fail "$label — expected to contain '$needle', got: $haystack"
+        fail "$label (expected to contain: '$needle')"
+        echo "         actual output: ${haystack:0:100}"
     fi
 }
 
 assert_not_contains() {
     local label="$1" haystack="$2" needle="$3"
     if [[ "$haystack" != *"$needle"* ]]; then
-        pass "$label (does not contain '$needle')"
+        pass "$label"
     else
-        fail "$label — expected NOT to contain '$needle', got: $haystack"
+        fail "$label (should NOT contain: '$needle')"
+        echo "         actual output: ${haystack:0:100}"
     fi
 }
 
@@ -110,25 +122,27 @@ assert_eq() {
     if [ "$actual" = "$expected" ]; then
         pass "$label"
     else
-        fail "$label — expected '$expected', got '$actual'"
+        fail "$label"
+        echo "         expected: '$expected'"
+        echo "         actual:   '$actual'"
     fi
 }
 
 assert_dir_exists() {
     local label="$1" dir="$2"
     if [ -d "$dir" ]; then
-        pass "$label (dir exists: $dir)"
+        pass "$label"
     else
-        fail "$label — directory does not exist: $dir"
+        fail "$label (directory does not exist: $dir)"
     fi
 }
 
 assert_dir_missing() {
     local label="$1" dir="$2"
     if [ ! -d "$dir" ]; then
-        pass "$label (dir absent: $dir)"
+        pass "$label"
     else
-        fail "$label — directory should not exist: $dir"
+        fail "$label (directory should not exist: $dir)"
     fi
 }
 
@@ -224,3 +238,28 @@ e2e_cleanup() {
     done < "$_CLEANUP_LIST"
     > "$_CLEANUP_LIST"
 }
+
+# --- Validation (after all helpers are defined) ---
+
+# Validate that all required helper functions are defined.
+# This catches issues early before tests run.
+_validate_helpers() {
+    local required_helpers=(
+        "pass" "fail" "summary"
+        "assert_exit" "assert_contains" "assert_not_contains" "assert_eq"
+        "assert_dir_exists" "assert_dir_missing"
+        "make_workspace" "relay_dir_for" "is_mounted" "e2e_cleanup"
+    )
+    local missing=()
+    for func in "${required_helpers[@]}"; do
+        if ! declare -f "$func" >/dev/null 2>&1; then
+            missing+=("$func")
+        fi
+    done
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "ERROR: Missing helper functions: ${missing[*]}" >&2
+        echo "This usually means setup.sh was not sourced correctly or is corrupted." >&2
+        exit 1
+    fi
+}
+_validate_helpers
