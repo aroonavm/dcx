@@ -30,8 +30,8 @@ Compared to system mounts (e.g., `mount -o bind`), bindfs gives dcx the flexibil
 Host /home/user/myproject ──[bindfs]──> Host ~/.colima-mounts/dcx-myproject-a1b2c3d4
                                               ↓ [Colima mount]
                                          VM ~/.colima-mounts/dcx-myproject-a1b2c3d4
-                                              ↓ [Docker bind]
-                                         Container /workspace
+                                              ↓ [Docker bind via --override-config]
+                                         Container /home/user/myproject
 ```
 
 **Technical Stack:**
@@ -86,7 +86,8 @@ dcx up [--workspace-folder PATH] [--config PATH] [--network MODE] [--dry-run] [-
 10. If mount exists: verify health + source matches (idempotent), else recover from stale
 11. If mount missing: create + mount with `bindfs --no-allow-other`
 12. If workspace not owned by user: warn + prompt (skip with `--yes`)
-13. Rewrite `--workspace-folder` → mount point; forward `--config` if provided
+13. Rewrite `--workspace-folder` → mount point (for `devcontainer.local_folder` label tracking); write temp `--override-config` JSON file (RAII-deleted after `devcontainer up`) that sets `workspaceMount` source=relay,target=original and `workspaceFolder`=original; forward `--config` if provided
+13.5. Network mode enforcement: check if any existing containers have a mismatched `dcx.network-mode` label. If found, stop and remove them so `devcontainer up` creates a fresh container with the requested mode. Handles containers that survived `dcx down` for any reason (e.g., FUSE mount disappeared but container remained).
 14. Delegate to `devcontainer up` (devcontainer stamps container with label `dcx.network-mode=<mode>`)
 15. On failure: rollback (unmount + remove dir), exit 1
 16. On SIGINT: rollback before exit
@@ -112,8 +113,8 @@ dcx exec [--workspace-folder PATH] [--config PATH] COMMAND [ARGS...]
 5. Verify mount exists + healthy
 6. Find running container by `devcontainer.local_folder` label on the relay mount point
 7. Print network mode (read from container label `dcx.network-mode`)
-8. Delegate to `devcontainer exec` with both `--container-id` (reliable container lookup) and `--workspace-folder` pointing to the relay mount point (so devcontainer reads the config and sets the remote working directory); forward `--config` if provided
-9. The user's shell lands in the `workspaceFolder` inside the container (e.g. `/workspaces/<name>`), not the container's home directory
+8. Delegate to `devcontainer exec` with `--container-id` (reliable container lookup), `--workspace-folder` pointing to the original workspace path (so devcontainer reads the config at the real location), `--override-config` temp JSON file setting `workspaceFolder` to the original path; forward `--config` if provided
+9. The user's shell lands in the original workspace path (e.g. `/home/user/myproject`) inside the container, matching the host path
 10. Forward SIGINT to child process
 
 ---
@@ -129,7 +130,7 @@ dcx down [--workspace-folder PATH]
 1. Validate Docker; fail exit 1
 2. Resolve workspace; fail exit 2 if missing or is a managed path
 3. Compute mount point
-4. If no mount: print "nothing to do", exit 0 (idempotent)
+4. If no mount AND no container: print "nothing to do", exit 0 (idempotent). Handles FUSE mount disappearing while container survives.
 5. Stop and remove container (find by `devcontainer.local_folder` label; `docker stop` then `docker rm`)
 6. Unmount bindfs
 7. Remove mount directory
@@ -248,4 +249,4 @@ Devcontainer creates volumes like `dcx-shellhistory-<devcontainerId>`. Only `--p
 - **No concurrent ops on same workspace** (avoid `dcx up` + `dcx down` simultaneously; users retry)
 - **No automatic Colima setup** (users edit `colima.yaml` manually)
 - **VS Code "Reopen in Container" unsupported** (no way to intercept VS Code's bundled devcontainer CLI). Workaround: `dcx up` + "Attach to Running Container"
-- **Custom `workspaceMount` in devcontainer.json:** If project specifies custom `workspaceMount` pointing to original path, it overrides dcx's rewrite → container fails. Solution: remove or adjust `workspaceMount` to use relay path.
+- **Custom `workspaceMount` in devcontainer.json:** dcx injects `workspaceMount` via `--override-config`, which takes precedence over the project's `devcontainer.json`. If a project specifies its own `workspaceMount`, it will be overridden by dcx.

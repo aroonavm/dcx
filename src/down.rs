@@ -71,10 +71,11 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
     let name = mount_name(&workspace);
     let mount_point = relay.join(&name);
 
-    // 6. If no mount found: nothing to do.
+    // 6. If no mount AND no container: nothing to do.
     let table = platform::read_mount_table().unwrap_or_default();
     let source_in_table = mount_table::find_mount_source(&table, &mount_point);
-    if source_in_table.is_none() {
+    let containers = docker::query_container_any(&mount_point);
+    if source_in_table.is_none() && containers.is_empty() {
         println!("{}", nothing_to_do(&workspace));
         return exit_codes::SUCCESS;
     }
@@ -87,7 +88,7 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
         eprintln!("{e}");
         return exit_codes::RUNTIME_ERROR;
     }
-    for container_id in docker::query_container_any(&mount_point) {
+    for container_id in containers {
         if let Err(e) = docker::remove_container(&container_id) {
             eprintln!("{e}");
             return exit_codes::RUNTIME_ERROR;

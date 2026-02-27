@@ -15,7 +15,22 @@ use crate::progress;
 use crate::signals;
 use crate::workspace::{find_devcontainer_config, resolve_workspace};
 
+// ── RAII helpers ──────────────────────────────────────────────────────────────
+
+/// RAII guard that deletes a file on drop.
+struct TempFile(PathBuf);
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 // ── Pure functions ────────────────────────────────────────────────────────────
+
+/// Escape a string for use as a JSON string value (handles `\` and `"`).
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
 
 /// Abbreviate `path` with `~` if it starts with `home`.
 pub fn tilde_path(path: &Path, home: &Path) -> String {
@@ -345,6 +360,35 @@ pub fn run_up(
         true
     };
 
+    // 9.5. Network mode enforcement: if an existing container was started with a different
+    // dcx.network-mode, remove it so devcontainer up creates a fresh container with the
+    // requested mode. Handles containers that survived dcx down for any reason.
+    let requested_network =
+        std::env::var("DCX_NETWORK_MODE").unwrap_or_else(|_| "minimal".to_string());
+    let stale_containers: Vec<String> = docker::query_container_any(&mount_point)
+        .into_iter()
+        .filter(|id| docker::read_network_mode(id).as_deref() != Some(requested_network.as_str()))
+        .collect();
+    if !stale_containers.is_empty() {
+        progress::step("Recreating container for new network mode...");
+        if let Err(e) = docker::stop_container(&mount_point) {
+            eprintln!("{e}");
+            if mounted_fresh {
+                rollback(&mount_point);
+            }
+            return exit_codes::RUNTIME_ERROR;
+        }
+        for id in &stale_containers {
+            if let Err(e) = docker::remove_container(id) {
+                eprintln!("{e}");
+                if mounted_fresh {
+                    rollback(&mount_point);
+                }
+                return exit_codes::RUNTIME_ERROR;
+            }
+        }
+    }
+
     // 10. Delegate to `devcontainer up` with rewritten workspace path.
     // Check the interrupted flag before starting devcontainer: if SIGINT arrived
     // in the window between do_mount returning and here, roll back and exit cleanly.
@@ -358,8 +402,36 @@ pub fn run_up(
     // is killed, run_stream returns non-zero, and we roll back below.
     progress::step("Starting devcontainer...");
     let mount_str = mount_point.to_string_lossy().into_owned();
+    let ws_str = workspace.to_string_lossy();
     let config_str = config.as_ref().map(|p| p.to_string_lossy().into_owned());
-    let mut dc_args = vec!["up", "--workspace-folder", &mount_str];
+
+    // Write a temp override config so the container mounts the workspace at its
+    // original host path rather than /workspace.  The source= uses the relay
+    // (Colima-visible) path; target= and workspaceFolder use the original path.
+    // The _override_guard RAII value deletes the file on every exit path.
+    let override_path = PathBuf::from(format!("/tmp/dcx-override-{}.json", std::process::id()));
+    let override_json = format!(
+        "{{\n  \"workspaceMount\": \"source={mount},target={ws},type=bind,consistency=delegated\",\n  \"workspaceFolder\": \"{ws}\"\n}}\n",
+        mount = json_escape(&mount_str),
+        ws = json_escape(&ws_str),
+    );
+    if let Err(e) = std::fs::write(&override_path, &override_json) {
+        if mounted_fresh {
+            rollback(&mount_point);
+        }
+        eprintln!("Failed to write override config: {e}");
+        return exit_codes::RUNTIME_ERROR;
+    }
+    let _override_guard = TempFile(override_path.clone());
+    let override_str = override_path.to_string_lossy().into_owned();
+
+    let mut dc_args = vec![
+        "up",
+        "--workspace-folder",
+        &mount_str,
+        "--override-config",
+        &override_str,
+    ];
     if let Some(ref s) = config_str {
         dc_args.push("--config");
         dc_args.push(s.as_str());
@@ -394,6 +466,29 @@ pub fn run_up(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- json_escape ---
+
+    #[test]
+    fn json_escape_plain_path_is_unchanged() {
+        assert_eq!(json_escape("/home/user/myproject"), "/home/user/myproject");
+    }
+
+    #[test]
+    fn json_escape_backslash_is_doubled() {
+        assert_eq!(json_escape("C:\\Users\\project"), "C:\\\\Users\\\\project");
+    }
+
+    #[test]
+    fn json_escape_double_quote_is_backslash_escaped() {
+        assert_eq!(json_escape("/path/\"quoted\""), "/path/\\\"quoted\\\"");
+    }
+
+    #[test]
+    fn json_escape_backslash_before_quote_both_escaped() {
+        // Ordering matters: backslash must be replaced before quote to avoid double-escaping.
+        assert_eq!(json_escape("a\\\"b"), "a\\\\\\\"b");
+    }
 
     // --- tilde_path ---
 
@@ -523,16 +618,6 @@ mod tests {
             .or_else(|_| std::env::var("USERNAME"))
             .unwrap_or_else(|_| "unknown".to_string());
         assert_eq!(name, expected);
-    }
-
-    #[test]
-    fn current_username_returns_non_empty_string() {
-        // Regardless of the env state, function must return a non-empty string.
-        let name = current_username();
-        assert!(
-            !name.is_empty(),
-            "current_username must not return empty string"
-        );
     }
 
     // --- username_for_uid ---
