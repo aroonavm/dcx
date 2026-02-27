@@ -105,6 +105,15 @@ assert_not_contains() {
     fi
 }
 
+assert_eq() {
+    local label="$1" expected="$2" actual="$3"
+    if [ "$actual" = "$expected" ]; then
+        pass "$label"
+    else
+        fail "$label — expected '$expected', got '$actual'"
+    fi
+}
+
 assert_dir_exists() {
     local label="$1" dir="$2"
     if [ -d "$dir" ]; then
