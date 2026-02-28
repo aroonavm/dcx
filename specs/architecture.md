@@ -107,12 +107,21 @@ Files can be declared in three ways:
 - Per-project config: `dcx_config.yaml` alongside `devcontainer.json` with `files:` list
 - Ad-hoc: `dcx up --file PATH`
 
-**`dcx_config.yaml` format:**
+**Examples:**
+
+`dcx_config.yaml` (per-project, plural `files:` key):
 ```yaml
 files:
   - path: ~/.gitconfig
   - path: ~/.claude.json
 ```
+
+CLI flag (ad-hoc, singular `--file`, repeatable):
+```bash
+dcx up --file ~/.gitconfig --file ~/.claude.json
+```
+
+Both achieve the same result: files are hardlinked into the container's original host paths.
 
 ---
 
