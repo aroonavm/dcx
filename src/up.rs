@@ -7,6 +7,8 @@ use std::process;
 use std::sync::atomic::Ordering;
 
 use crate::cmd;
+use crate::colima;
+use crate::dcx_config;
 use crate::docker;
 use crate::exit_codes;
 use crate::mount_table;
@@ -87,6 +89,56 @@ fn build_env_overrides(
         }
     }
     vars
+}
+
+// ── File staging ──────────────────────────────────────────────────────────────
+
+/// Return the per-workspace staging directory alongside the relay mount point.
+///
+/// relay_dir  = `~/.colima-mounts/dcx-myproject-a1b2c3d4`
+/// staging    = `~/.colima-mounts/.dcx-myproject-a1b2c3d4-files`
+///
+/// The dot prefix hides this directory from `scan_relay` (which matches `dcx-` prefix only).
+pub fn staging_dir(relay_dir: &Path) -> PathBuf {
+    let name = relay_dir.file_name().unwrap_or_default().to_string_lossy();
+    relay_dir
+        .parent()
+        .unwrap_or(relay_dir)
+        .join(format!(".{name}-files"))
+}
+
+/// Stage a host file into `staging` by hardlink (bidirectional) with copy fallback (readonly).
+///
+/// Returns `(staged_path, is_writable)`:
+/// - `is_writable = true` means a hardlink was created — writes inside the container propagate
+///   back to the original host file.
+/// - `is_writable = false` means a copy was made (cross-filesystem) — container writes are not
+///   persisted to the host.
+pub fn stage_file(src: &Path, staging: &Path) -> Result<(PathBuf, bool), String> {
+    std::fs::create_dir_all(staging)
+        .map_err(|e| format!("Failed to create staging dir {}: {e}", staging.display()))?;
+    let file_name = src
+        .file_name()
+        .ok_or_else(|| format!("No filename in path: {}", src.display()))?;
+    let dst = staging.join(file_name);
+    if dst.exists() {
+        std::fs::remove_file(&dst)
+            .map_err(|e| format!("Failed to remove existing {}: {e}", dst.display()))?;
+    }
+    match std::fs::hard_link(src, &dst) {
+        Ok(()) => Ok((dst, true)),
+        // EXDEV = 18 on Linux and macOS: cross-device link (different filesystem)
+        Err(e) if e.raw_os_error() == Some(18) => {
+            eprintln!(
+                "Warning: {} is on a different filesystem; staging as readonly copy.",
+                src.display()
+            );
+            std::fs::copy(src, &dst)
+                .map_err(|e| format!("Failed to copy {}: {e}", src.display()))?;
+            Ok((dst, false))
+        }
+        Err(e) => Err(format!("{e}")),
+    }
 }
 
 /// Find the position of the `]` that closes the `[` at `open_pos` in `json`.
@@ -518,6 +570,13 @@ fn rollback(mount_point: &Path) {
     if let Err(e) = std::fs::remove_dir(mount_point) {
         eprintln!("Warning: rollback rmdir failed: {e}");
     }
+    // Clean up the staging dir that may have been populated before devcontainer up failed.
+    let staging = staging_dir(mount_point);
+    if staging.exists()
+        && let Err(e) = std::fs::remove_dir_all(&staging)
+    {
+        eprintln!("Warning: rollback staging cleanup failed: {e}");
+    }
     eprintln!("Mount rolled back.");
 }
 
@@ -529,7 +588,8 @@ fn rollback(mount_point: &Path) {
 pub fn run_up(
     home: &Path,
     workspace_folder: Option<PathBuf>,
-    config: Option<PathBuf>,
+    config_dir: Option<PathBuf>,
+    extra_files: &[PathBuf],
     dry_run: bool,
     yes: bool,
 ) -> i32 {
@@ -556,21 +616,33 @@ pub fn run_up(
         workspace.display()
     ));
 
-    // 2b. Resolve --config to an absolute path and validate it exists.
-    let config: Option<PathBuf> = if let Some(p) = config {
-        let abs = if p.is_absolute() {
-            p
+    // 2b. Resolve --config-dir to an absolute path and locate devcontainer.json inside it.
+    let (devcontainer_config, dcx_config_dir): (Option<PathBuf>, Option<PathBuf>) =
+        if let Some(dir) = config_dir {
+            let abs_dir = if dir.is_absolute() {
+                dir
+            } else {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(&dir))
+                    .unwrap_or(dir)
+            };
+            if !abs_dir.exists() {
+                eprintln!("Config directory not found: {}", abs_dir.display());
+                return exit_codes::USAGE_ERROR;
+            }
+            if !abs_dir.is_dir() {
+                eprintln!("Config path is not a directory: {}", abs_dir.display());
+                return exit_codes::USAGE_ERROR;
+            }
+            let json = abs_dir.join("devcontainer.json");
+            if !json.exists() {
+                eprintln!("devcontainer.json not found in: {}", abs_dir.display());
+                return exit_codes::USAGE_ERROR;
+            }
+            (Some(json), Some(abs_dir))
         } else {
-            std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
+            (None, None)
         };
-        if !abs.exists() {
-            eprintln!("Config file not found: {}", abs.display());
-            return exit_codes::USAGE_ERROR;
-        }
-        Some(abs)
-    } else {
-        None
-    };
 
     // 3. Recursive mount guard — block nested dcx mounts.
     let relay = relay_dir(home);
@@ -583,7 +655,7 @@ pub fn run_up(
     }
 
     // 4. Require a devcontainer configuration.
-    if config.is_none() && find_devcontainer_config(&workspace).is_none() {
+    if devcontainer_config.is_none() && find_devcontainer_config(&workspace).is_none() {
         eprintln!(
             "No devcontainer configuration found in {}.",
             workspace.display()
@@ -599,7 +671,12 @@ pub fn run_up(
     if dry_run {
         println!(
             "{}",
-            dry_run_plan(&workspace, &mount_point, home, config.as_deref())
+            dry_run_plan(
+                &workspace,
+                &mount_point,
+                home,
+                devcontainer_config.as_deref()
+            )
         );
         return exit_codes::SUCCESS;
     }
@@ -713,10 +790,12 @@ pub fn run_up(
     // is killed, run_stream returns non-zero, and we roll back below.
     progress::step("Starting devcontainer...");
     let mount_str = mount_point.to_string_lossy();
-    let config_str = config.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let config_str = devcontainer_config
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned());
 
     // Hoist base config reading so dedup can check it before building extra mounts/env.
-    let base_config_path = config
+    let base_config_path = devcontainer_config
         .clone()
         .or_else(|| find_devcontainer_config(&workspace));
     let base_config_read: Option<Result<String, std::io::Error>> =
@@ -729,19 +808,42 @@ pub fn run_up(
 
     // Read colima.yaml and discover mounts to inject, deduplicating against base config.
     let (extra_mounts, extra_env) = {
-        let colima_path = crate::colima::colima_config_path(home);
+        let colima_path = colima::colima_config_path(home);
+        let staging = staging_dir(&mount_point);
         let mut mounts_to_inject = Vec::new();
         let mut env_to_inject = Vec::new();
 
         if let Ok(yaml_content) = std::fs::read_to_string(&colima_path) {
-            let colima_mounts = crate::colima::parse_colima_mounts(&yaml_content);
-            let filtered_mounts = crate::colima::filter_relay_mounts(colima_mounts);
+            let colima_mounts = colima::parse_colima_mounts(&yaml_content);
+            let filtered_mounts = colima::filter_relay_mounts(colima_mounts);
 
             for mount in &filtered_mounts {
-                let expanded = crate::colima::expand_tilde(&mount.location, home);
+                let expanded = colima::expand_tilde(&mount.location, home);
                 // Skip: host path missing, or target already declared in base config
                 if expanded.exists() && !mount_target_in_base(&expanded, base_json, home) {
-                    mounts_to_inject.push(build_mount_entry(&expanded, mount.writable));
+                    if expanded.is_file() {
+                        // Files can't be mounted directly by Colima into the VM.
+                        // Stage via hardlink (bidirectional) or copy fallback (readonly).
+                        match stage_file(&expanded, &staging) {
+                            Ok((staged, writable)) => {
+                                let opts = if writable {
+                                    "type=bind"
+                                } else {
+                                    "type=bind,readonly"
+                                };
+                                mounts_to_inject.push(format!(
+                                    "source={},target={},{opts}",
+                                    json_escape(&staged.to_string_lossy()),
+                                    json_escape(&expanded.to_string_lossy()),
+                                ));
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: Could not stage {}: {e}", expanded.display())
+                            }
+                        }
+                    } else {
+                        mounts_to_inject.push(build_mount_entry(&expanded, mount.writable));
+                    }
                 }
             }
 
@@ -751,6 +853,53 @@ pub fn run_up(
                 if val_path.exists() && !env_key_in_container_env(&key, base_json) {
                     env_to_inject.push((key, val));
                 }
+            }
+        }
+
+        // Collect files from dcx_config.yaml and --file CLI flag.
+        let explicit_files: Vec<PathBuf> = {
+            let mut v: Vec<PathBuf> = extra_files.to_vec();
+            if let Some(ref dir) = dcx_config_dir {
+                let cfg = dcx_config::read_dcx_config(&dir.join("dcx_config.yaml"));
+                for loc in cfg.files {
+                    v.push(colima::expand_tilde(&loc, home));
+                }
+            }
+            v
+        };
+
+        for file_path in &explicit_files {
+            if !file_path.exists() {
+                eprintln!(
+                    "Warning: --file {} does not exist, skipping.",
+                    file_path.display()
+                );
+                continue;
+            }
+            if !file_path.is_file() {
+                eprintln!(
+                    "Warning: --file {} is not a file, skipping.",
+                    file_path.display()
+                );
+                continue;
+            }
+            if mount_target_in_base(file_path, base_json, home) {
+                continue;
+            }
+            match stage_file(file_path, &staging) {
+                Ok((staged, writable)) => {
+                    let opts = if writable {
+                        "type=bind"
+                    } else {
+                        "type=bind,readonly"
+                    };
+                    mounts_to_inject.push(format!(
+                        "source={},target={},{opts}",
+                        json_escape(&staged.to_string_lossy()),
+                        json_escape(&file_path.to_string_lossy()),
+                    ));
+                }
+                Err(e) => eprintln!("Warning: Could not stage {}: {e}", file_path.display()),
             }
         }
 
@@ -832,7 +981,8 @@ pub fn run_up(
     // 12. Tag the base image for later cleanup by `dcx clean --purge`.
     // Non-fatal: if tagging fails (e.g. no "image" field in devcontainer.json),
     // purge will simply skip base image removal for this workspace.
-    if let Some(base_image) = docker::get_base_image_name(&workspace, config.as_deref())
+    if let Some(base_image) =
+        docker::get_base_image_name(&workspace, devcontainer_config.as_deref())
         && let Err(e) = docker::tag_base_image(&base_image, &name)
     {
         eprintln!("Warning: Could not tag base image: {e}");
@@ -1465,6 +1615,233 @@ mod tests {
         assert!(
             result.contains("\"GIT_CONFIG_GLOBAL\":"),
             "should inject even though key appears in description: {result}"
+        );
+    }
+
+    // --- staging_dir ---
+
+    #[test]
+    fn staging_dir_is_per_workspace_dot_prefixed_alongside_relay() {
+        let relay = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
+        let staging = staging_dir(relay);
+        assert_eq!(
+            staging,
+            PathBuf::from("/home/user/.colima-mounts/.dcx-myproject-a1b2c3d4-files")
+        );
+    }
+
+    #[test]
+    fn staging_dir_uses_relay_name_as_prefix() {
+        let relay = Path::new("/home/user/.colima-mounts/dcx-other-b5c6d7e8");
+        let staging = staging_dir(relay);
+        let name = staging.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.starts_with(".dcx-other-b5c6d7e8"),
+            "staging dir must use relay name: {name}"
+        );
+        assert!(
+            name.ends_with("-files"),
+            "staging dir must end with -files: {name}"
+        );
+    }
+
+    // --- stage_file ---
+
+    #[test]
+    fn stage_file_hardlinks_to_staging_dir() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("test.txt");
+        std::fs::write(&src, "content").unwrap();
+        let staging = dir.path().join("staging");
+        let (staged, _writable) = stage_file(&src, &staging).unwrap();
+        // Same inode = hardlink (bidirectional)
+        let src_ino = std::fs::metadata(&src).unwrap().ino();
+        let dst_ino = std::fs::metadata(&staged).unwrap().ino();
+        assert_eq!(src_ino, dst_ino, "hardlink must share the same inode");
+    }
+
+    #[test]
+    fn stage_file_creates_staging_dir_if_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("test.txt");
+        std::fs::write(&src, "content").unwrap();
+        let staging = dir.path().join("staging").join("subdir");
+        assert!(!staging.exists());
+        stage_file(&src, &staging).unwrap();
+        assert!(staging.exists());
+    }
+
+    #[test]
+    fn stage_file_returns_path_with_original_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join(".gitconfig");
+        std::fs::write(&src, "content").unwrap();
+        let staging = dir.path().join("staging");
+        let (staged, _) = stage_file(&src, &staging).unwrap();
+        assert_eq!(staged.file_name().unwrap(), ".gitconfig");
+    }
+
+    #[test]
+    fn stage_file_overwrites_existing_staged_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("test.txt");
+        std::fs::write(&src, "new content").unwrap();
+        let staging = dir.path().join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let dst = staging.join("test.txt");
+        std::fs::write(&dst, "old content").unwrap();
+        stage_file(&src, &staging).unwrap();
+        let content = std::fs::read_to_string(&dst).unwrap();
+        assert_eq!(content, "new content");
+    }
+
+    #[test]
+    fn stage_file_writable_true_for_hardlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("test.txt");
+        std::fs::write(&src, "content").unwrap();
+        let staging = dir.path().join("staging");
+        let (_staged, writable) = stage_file(&src, &staging).unwrap();
+        // On same filesystem, hard_link succeeds → writable = true
+        assert!(
+            writable,
+            "hardlink on same filesystem must return writable=true"
+        );
+    }
+
+    // Note: the EXDEV (errno 18) copy-fallback path in stage_file cannot be exercised
+    // as a unit test without access to two distinct filesystem mount points (which
+    // requires root or specific E2E infrastructure). It is covered by the E2E test
+    // test_dcx_file_staging.sh when Colima is running.
+
+    // --- find_closing_brace ---
+
+    #[test]
+    fn find_closing_brace_returns_none_for_unclosed_brace() {
+        // No matching `}` in the input — must return None without panicking
+        let json = "{\"key\": \"value\"";
+        assert_eq!(find_closing_brace(json, 0), None);
+    }
+
+    #[test]
+    fn find_closing_brace_ignores_braces_inside_strings() {
+        // A `}` that appears inside a JSON string must not close the outer object
+        let json = r#"{"key": "has } inside string"}"#;
+        let pos = find_closing_brace(json, 0).expect("must find the outer closing brace");
+        assert_eq!(pos, json.len() - 1, "must skip the brace inside the string");
+    }
+
+    #[test]
+    fn find_closing_brace_handles_escaped_quote_in_string() {
+        // An escaped `\"` must not end the string; the `}` inside the string is skipped
+        let json = r#"{"key": "escaped \" and } here"}"#;
+        let pos = find_closing_brace(json, 0).expect("must find the outer closing brace");
+        assert_eq!(pos, json.len() - 1);
+    }
+
+    // --- inject_mounts: malformed JSON fallbacks ---
+
+    #[test]
+    fn inject_mounts_returns_input_unchanged_when_no_closing_brace_anywhere() {
+        // No `}` anywhere and no `"mounts"` key — rfind('}') returns None, return original
+        let json = "\"image\": \"ubuntu\"";
+        let entries = vec!["source=/a,target=/a,type=bind".to_string()];
+        let result = inject_mounts(json, &entries);
+        assert_eq!(
+            result, json,
+            "must return input unchanged when no `}}` to insert before"
+        );
+    }
+
+    #[test]
+    fn inject_mounts_falls_back_to_new_section_when_mounts_array_unclosed() {
+        // `"mounts"` key and `[` found, but closing `]` is missing.
+        // find_closing_bracket returns None → falls through to rfind('}') path
+        // → appends a new "mounts" array before the outer `}`.
+        let json = "{\"image\": \"ubuntu\", \"mounts\": [\"old\"}";
+        let entries = vec!["source=/a,target=/a,type=bind".to_string()];
+        let result = inject_mounts(json, &entries);
+        assert!(
+            result.contains("source=/a,target=/a,type=bind"),
+            "must inject entry via fallback path: {result}"
+        );
+    }
+
+    // --- inject_env_vars: malformed JSON fallbacks ---
+
+    #[test]
+    fn inject_env_vars_drops_vars_when_container_env_brace_unclosed() {
+        // `"containerEnv"` found and its `{` found, but closing `}` is missing.
+        // find_closing_brace returns None → vars are NOT injected (silently dropped).
+        let json = r#"{"containerEnv": {"KEY": "val"}"#; // outer `}` missing
+        // The inner `}` closes containerEnv. The outer object has no `}`.
+        // Actually: containerEnv `{` is at position after `: `. The inner `}` closes it.
+        // Then outer `}` is missing.
+        // inject_env_vars finds containerEnv, finds its `{`, finds its matching `}` (the inner one),
+        // injects into it and returns. So this test case actually works fine.
+        //
+        // For the brace-unclosed case we need the containerEnv `{` itself to be unclosed:
+        let json = r#"{"containerEnv": {"KEY": "val""#; // inner `}` missing too
+        let vars = vec![("NEW_KEY".to_string(), "new_value".to_string())];
+        let result = inject_env_vars(json, &vars);
+        assert!(
+            !result.contains("NEW_KEY"),
+            "vars must be silently dropped when containerEnv brace is unclosed: {result}"
+        );
+    }
+
+    #[test]
+    fn inject_env_vars_returns_input_unchanged_when_no_closing_brace() {
+        // No `}` anywhere and no `"containerEnv"` key.
+        // The else-branch also fails since rfind('}') returns None.
+        let json = "\"image\": \"ubuntu\"";
+        let vars = vec![("FOO".to_string(), "bar".to_string())];
+        let result = inject_env_vars(json, &vars);
+        assert_eq!(
+            result, json,
+            "must return input unchanged when no `}}` to insert before"
+        );
+    }
+
+    // --- generate_override_config ---
+
+    #[test]
+    fn generate_override_config_contains_both_workspace_fields() {
+        let relay = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
+        let workspace = Path::new("/home/user/myproject");
+        let json = generate_override_config(relay, workspace);
+        assert!(
+            json.contains("\"workspaceMount\""),
+            "must contain workspaceMount: {json}"
+        );
+        assert!(
+            json.contains("\"workspaceFolder\""),
+            "must contain workspaceFolder: {json}"
+        );
+        assert!(
+            json.contains(workspace.to_str().unwrap()),
+            "must contain workspace path: {json}"
+        );
+        assert!(
+            json.contains(relay.to_str().unwrap()),
+            "must contain relay path in workspaceMount source: {json}"
+        );
+    }
+
+    #[test]
+    fn generate_override_config_escapes_special_chars_in_paths() {
+        let relay = Path::new("/home/user/.colima-mounts/dcx-my\"project-a1b2c3d4");
+        let workspace = Path::new("/home/user/my\"project");
+        let json = generate_override_config(relay, workspace);
+        // Special chars in paths must be JSON-escaped, not appear raw
+        assert!(
+            !json.contains("\"/home/user/my\"project\""),
+            "raw unescaped quote must not appear in output: {json}"
+        );
+        assert!(
+            json.contains("\\\""),
+            "path with quote must be JSON-escaped: {json}"
         );
     }
 }

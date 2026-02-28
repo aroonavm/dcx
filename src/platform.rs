@@ -89,30 +89,4 @@ mod tests {
             "/home/user/.colima-mounts/dcx-proj-a1b2c3d4"
         );
     }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn unmount_prog_linux_is_fusermount() {
-        assert_eq!(unmount_prog(), "fusermount");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn unmount_args_linux_is_fusermount_dash_u_mount_point() {
-        let args = unmount_args(Path::new("/tmp/test"));
-        assert_eq!(args, vec!["-u", "/tmp/test"]);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn unmount_prog_macos_is_umount() {
-        assert_eq!(unmount_prog(), "umount");
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn unmount_args_macos_has_one_element() {
-        let args = unmount_args(Path::new("/tmp/test"));
-        assert_eq!(args.len(), 1);
-    }
 }

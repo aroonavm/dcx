@@ -161,7 +161,7 @@ pub fn build_exec_args(
 pub fn run_exec(
     home: &Path,
     workspace_folder: Option<PathBuf>,
-    config: Option<PathBuf>,
+    config_dir: Option<PathBuf>,
     command: Vec<String>,
 ) -> i32 {
     // 1. Validate Docker/Colima is available.
@@ -177,6 +177,33 @@ pub fn run_exec(
             eprintln!("{e}");
             return exit_codes::USAGE_ERROR;
         }
+    };
+
+    // 2b. Resolve --config-dir to an absolute path and locate devcontainer.json inside it.
+    let devcontainer_config: Option<PathBuf> = if let Some(dir) = config_dir {
+        let abs_dir = if dir.is_absolute() {
+            dir
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(&dir))
+                .unwrap_or(dir)
+        };
+        if !abs_dir.exists() {
+            eprintln!("Config directory not found: {}", abs_dir.display());
+            return exit_codes::USAGE_ERROR;
+        }
+        if !abs_dir.is_dir() {
+            eprintln!("Config path is not a directory: {}", abs_dir.display());
+            return exit_codes::USAGE_ERROR;
+        }
+        let json = abs_dir.join("devcontainer.json");
+        if !json.exists() {
+            eprintln!("devcontainer.json not found in: {}", abs_dir.display());
+            return exit_codes::USAGE_ERROR;
+        }
+        Some(json)
+    } else {
+        None
     };
     progress::step(&format!(
         "Resolving workspace path: {}",
@@ -234,7 +261,7 @@ pub fn run_exec(
     let override_config = match TempFile::new() {
         Ok(temp_file) => {
             // Try to read the base devcontainer.json and generate a merged config
-            let base_config_path = config
+            let base_config_path = devcontainer_config
                 .clone()
                 .or_else(|| find_devcontainer_config(&workspace));
             let json_content = if let Some(ref path) = base_config_path {
@@ -273,7 +300,7 @@ pub fn run_exec(
     let args = build_exec_args(
         &container_id,
         &workspace,
-        config.as_deref(),
+        devcontainer_config.as_deref(),
         override_config.as_ref().map(|t| t.path()),
         &command,
     );

@@ -25,9 +25,13 @@ pub enum Commands {
         #[arg(long, value_name = "PATH")]
         workspace_folder: Option<PathBuf>,
 
-        /// Path to devcontainer.json config file (default: auto-detected)
-        #[arg(long, value_name = "PATH")]
-        config: Option<PathBuf>,
+        /// Directory containing devcontainer.json (default: auto-detected)
+        #[arg(long, value_name = "DIR")]
+        config_dir: Option<PathBuf>,
+
+        /// Host file path to stage into the container (may be repeated)
+        #[arg(long = "file", value_name = "PATH")]
+        files: Vec<PathBuf>,
 
         /// Print what would happen without doing it
         #[arg(long)]
@@ -53,9 +57,9 @@ pub enum Commands {
         #[arg(long, value_name = "PATH")]
         workspace_folder: Option<PathBuf>,
 
-        /// Path to devcontainer.json config file (default: auto-detected)
-        #[arg(long, value_name = "PATH")]
-        config: Option<PathBuf>,
+        /// Directory containing devcontainer.json (default: auto-detected)
+        #[arg(long, value_name = "DIR")]
+        config_dir: Option<PathBuf>,
 
         /// Command and arguments to run inside the container
         #[arg(

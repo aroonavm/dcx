@@ -47,7 +47,6 @@ rm -rf "$WS2"
 echo "--- rollback on failure ---"
 WS3=$(make_workspace)
 # Replace the image with a non-existent one to force devcontainer up to fail.
-# Pass --config explicitly to prevent DCX_DEVCONTAINER_CONFIG_PATH from overriding.
 cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'
 {
     "image": "dcx-e2e-nonexistent-image:0.0.0"
@@ -55,11 +54,18 @@ cat >"$WS3/.devcontainer/devcontainer.json" <<'EOF'
 EOF
 
 fail_code=0
-fail_out=$("$DCX" up --workspace-folder "$WS3" --config "$WS3/.devcontainer/devcontainer.json" 2>&1) || fail_code=$?
+fail_out=$("$DCX" up --workspace-folder "$WS3" 2>&1) || fail_code=$?
 assert_exit "rollback: up exits 1" 1 "$fail_code"
 assert_contains "rollback prints message" "$fail_out" "Mount rolled back."
 # Rollback must remove the relay dir for WS3 — no leftover mount.
 assert_dir_missing "rollback: no leftover mount" "$(relay_dir_for "$WS3")"
+# Rollback must also remove the staging dir if it was created
+staging=$(relay_dir_for "$WS3" | sed 's/dcx-/\.dcx-/')."-files"
+if [ -d "$staging" ]; then
+    fail "rollback: staging dir not cleaned up: $staging"
+else
+    pass "rollback: staging dir cleaned"
+fi
 rm -rf "$WS3"
 
 # --- Recursive mount guard exits 2 ---

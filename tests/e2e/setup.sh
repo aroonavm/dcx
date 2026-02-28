@@ -7,9 +7,9 @@ set -euo pipefail
 # Trap undefined function calls and command errors to ensure tests fail properly
 trap 'echo "ERROR: Command failed at line $LINENO"; exit 1' ERR
 
-# Prevent the host's DCX_DEVCONTAINER_CONFIG_PATH from leaking into tests.
+# Prevent the host's DCX_DEVCONTAINER_CONFIG_DIR_PATH from leaking into tests.
 # Tests that need to test env-var behaviour set it explicitly themselves.
-unset DCX_DEVCONTAINER_CONFIG_PATH || true
+unset DCX_DEVCONTAINER_CONFIG_DIR_PATH || true
 
 # Locate the dcx binary: prefer the debug build next to this file.
 DCX=${DCX:-$(cd "$(dirname "$0")/../.." && pwd)/target/debug/dcx}
@@ -208,6 +208,7 @@ is_mounted() {
 e2e_cleanup() {
     [ -f "$_CLEANUP_LIST" ] || return
     local ws
+    local base_images_to_remove=()
     while IFS= read -r ws; do
         [ -n "$ws" ] || continue
         local relay_dir relay_name
@@ -239,14 +240,26 @@ e2e_cleanup() {
             | grep "^vsc-${relay_name}-" \
             | grep -- '-uid' \
             | xargs -r docker rmi 2>/dev/null || true
+
+        # Collect base images for this workspace to remove later (scoped cleanup).
+        # Only remove base images that actually correspond to this workspace.
+        while IFS= read -r img; do
+            [ -n "$img" ] || continue
+            base_images_to_remove+=("$img")
+        done < <(docker images --format "{{.Repository}}:{{.Tag}}" \
+            | grep "^dcx-base:dcx-" \
+            | grep -- "${relay_name}" \
+            2>/dev/null || true)
     done < "$_CLEANUP_LIST"
     > "$_CLEANUP_LIST"
 
-    # Remove any intermediate base images created during tests (dcx-base:dcx-*)
-    # These are created by devcontainer during the build but not tied to a specific relay_name
-    docker images --format "{{.Repository}}:{{.Tag}}" \
-        | grep "^dcx-base:dcx-" \
-        | xargs -r docker rmi 2>/dev/null || true
+    # Remove only base images that were tied to workspaces we cleaned up.
+    # This prevents deleting pre-existing base images from other tests or projects.
+    if [ ${#base_images_to_remove[@]} -gt 0 ]; then
+        for img in "${base_images_to_remove[@]}"; do
+            docker rmi "$img" 2>/dev/null || true
+        done
+    fi
 }
 
 # --- Validation (after all helpers are defined) ---

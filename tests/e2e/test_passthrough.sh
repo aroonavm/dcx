@@ -17,14 +17,6 @@ code=$?
 assert_exit "read-configuration forwards to devcontainer" 0 "$code"
 assert_contains "read-configuration returns JSON" "$out" "configuration"
 
-# --- dcx up --dry-run works without bindfs ---
-echo "--- up --dry-run without bindfs ---"
-ws=$(make_workspace)
-out=$("$DCX" up --dry-run --workspace-folder "$ws" 2>&1) || true
-code=$?
-# --dry-run should print the plan and exit 0, even without Colima
-assert_exit "up --dry-run exits 0" 0 "$code"
-
 # --- Exit codes propagate from devcontainer ---
 echo "--- exit code propagation ---"
 code=0

@@ -48,7 +48,7 @@ Shell scripts that test the full mount → container → cleanup lifecycle. Thes
 **`dcx clean` is tested exclusively in Layer 2** (Rust integration tests) with isolated temporary HOME directories.
 
 **Environment isolation rules:**
-- `setup.sh` unconditionally unsets `DCX_DEVCONTAINER_CONFIG_PATH` so the host shell's config path cannot leak into tests and cause negative tests (tests that expect `dcx up` to fail) to unexpectedly succeed. Tests that specifically test env-var behaviour must set it explicitly.
+- `setup.sh` unconditionally unsets `DCX_DEVCONTAINER_CONFIG_DIR_PATH` so the host shell's config dir path cannot leak into tests and cause negative tests (tests that expect `dcx up` to fail) to unexpectedly succeed. Tests that specifically test env-var behaviour must set it explicitly.
 - Tests never use `ls -d "${RELAY}"/dcx-* | head/tail/wc` to reason about relay state, because pre-existing user workspaces pollute the count. Instead, use `relay_dir_for "$WS"` (defined in `setup.sh`) to compute the exact relay directory for a specific workspace. This helper mirrors `naming.rs` exactly (sanitize + SHA256 hash).
 - Assertions about "No active workspaces" are replaced with workspace-specific checks (e.g., assert the relay dir for `$WS` is absent).
 - Workspace tracking uses a temp file (`$_CLEANUP_LIST`) instead of a bash array, because array modifications inside subshells are lost. `make_workspace` (called via command substitution) appends workspace paths to the file, making them visible to the parent shell's `e2e_cleanup` function.

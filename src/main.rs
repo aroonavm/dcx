@@ -4,6 +4,7 @@ mod cli;
 mod cmd;
 mod colima;
 mod completions;
+mod dcx_config;
 mod docker;
 mod doctor;
 mod down;
@@ -36,13 +37,14 @@ fn main() {
     match cli.command {
         cli::Commands::Up {
             workspace_folder,
-            config,
+            config_dir,
+            files,
             dry_run,
             yes,
             network,
         } => {
-            let config = config.or_else(|| {
-                std::env::var("DCX_DEVCONTAINER_CONFIG_PATH")
+            let config_dir = config_dir.or_else(|| {
+                std::env::var("DCX_DEVCONTAINER_CONFIG_DIR_PATH")
                     .ok()
                     .map(std::path::PathBuf::from)
             });
@@ -53,25 +55,26 @@ fn main() {
             std::process::exit(up::run_up(
                 &home_dir(),
                 workspace_folder,
-                config,
+                config_dir,
+                &files,
                 dry_run,
                 yes,
             ));
         }
         cli::Commands::Exec {
             workspace_folder,
-            config,
+            config_dir,
             command,
         } => {
-            let config = config.or_else(|| {
-                std::env::var("DCX_DEVCONTAINER_CONFIG_PATH")
+            let config_dir = config_dir.or_else(|| {
+                std::env::var("DCX_DEVCONTAINER_CONFIG_DIR_PATH")
                     .ok()
                     .map(std::path::PathBuf::from)
             });
             std::process::exit(exec::run_exec(
                 &home_dir(),
                 workspace_folder,
-                config,
+                config_dir,
                 command,
             ));
         }

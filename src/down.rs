@@ -11,7 +11,7 @@ use crate::naming::{is_dcx_managed_path, mount_name, relay_dir};
 use crate::platform;
 use crate::progress;
 use crate::signals;
-use crate::up::tilde_path;
+use crate::up::{staging_dir, tilde_path};
 use crate::workspace::resolve_workspace;
 
 // ── Pure functions ────────────────────────────────────────────────────────────
@@ -122,6 +122,17 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
     if let Err(e) = std::fs::remove_dir(&mount_point) {
         eprintln!("Failed to remove {}: {e}", mount_point.display());
         return exit_codes::RUNTIME_ERROR;
+    }
+
+    // 9b. Remove staging directory for this workspace (non-fatal).
+    let staging = staging_dir(&mount_point);
+    if staging.exists()
+        && let Err(e) = std::fs::remove_dir_all(&staging)
+    {
+        eprintln!(
+            "Warning: Failed to remove staging dir {}: {e}",
+            staging.display()
+        );
     }
 
     if was_interrupted {

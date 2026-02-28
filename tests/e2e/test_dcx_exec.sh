@@ -24,8 +24,9 @@ assert_contains "exec stdout contains hello" "$out" "hello"
 # --- Exit code pass-through ---
 echo "--- exit code passthrough ---"
 code=0
-"$DCX" exec --workspace-folder "$WS" sh -c 'exit 42' 2>/dev/null || code=$?
+out=$("$DCX" exec --workspace-folder "$WS" sh -c 'echo from_container; exit 42' 2>/dev/null) || code=$?
 assert_exit "exec passes exit code 42" 42 "$code"
+assert_contains "exec stdout is forwarded" "$out" "from_container"
 
 # --- No mount: fails with correct message ---
 echo "--- no mount error ---"
