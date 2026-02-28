@@ -39,18 +39,50 @@ dcx down                                     # Stop container and cleanup
 
 ### Environment Variables
 
-Set `DCX_DEVCONTAINER_CONFIG_PATH` to avoid passing `--config` on every invocation:
+Set `DCX_DEVCONTAINER_CONFIG_DIR_PATH` to avoid passing `--config-dir` on every invocation:
 
 ```bash
-export DCX_DEVCONTAINER_CONFIG_PATH=~/.dcx/devcontainer.json
-dcx up --workspace-folder ~/project-a       # Uses env var config
-dcx up --workspace-folder ~/project-b       # Uses env var config
-dcx up --workspace-folder ~/project-c --config /other/config.json  # Flag overrides env var
+export DCX_DEVCONTAINER_CONFIG_DIR_PATH=~/.dcx/
+dcx up --workspace-folder ~/project-a       # Uses env var config directory
+dcx up --workspace-folder ~/project-b       # Uses env var config directory
+dcx up --workspace-folder ~/project-c --config-dir /other/config  # Flag overrides env var
+```
+
+The directory must contain a `devcontainer.json` file and optionally a `dcx_config.yaml` file.
+
+### Per-Project File Mounting
+
+Mount specific host files into containers via a `dcx_config.yaml` file or the `--file` CLI flag.
+
+**Option 1: Per-project config file (`dcx_config.yaml`)**
+
+Create `.devcontainer/dcx_config.yaml` (or `dcx_config.yaml` in your project root):
+
+```yaml
+files:
+  - path: ~/.gitconfig
+  - path: ~/.claude.json
+```
+
+Then:
+
+```bash
+dcx up --workspace-folder .
+```
+
+These files are hardlinked into the container (writes propagate back to host), or copied as readonly if on a different filesystem.
+
+**Option 2: CLI flag**
+
+Mount files ad-hoc with `--file`:
+
+```bash
+dcx up --workspace-folder . --file ~/.gitconfig --file ~/.ssh/id_ed25519
 ```
 
 ### Git and Claude Config in Containers
 
-Add these two mounts to your Colima config file (`~/.config/colima/default/colima.yaml` on Linux, `~/.colima/default/colima.yaml` on macOS):
+Add these mounts to your Colima config file (`~/.config/colima/default/colima.yaml` on Linux, `~/.colima/default/colima.yaml` on macOS):
 
 ```yaml
 mounts:
@@ -91,9 +123,9 @@ Each container gets its own network mode. Useful for:
 
 ```bash
 # Example: Shared dev environment with mixed trust levels
-dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/trusted-project --network minimal
-dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/untrusted-agent --network restricted
-dcx up --config ~/.dcx/devcontainer.json --workspace-folder ~/testing-project --network host
+dcx up --config-dir ~/.dcx --workspace-folder ~/trusted-project --network minimal
+dcx up --config-dir ~/.dcx --workspace-folder ~/untrusted-agent --network restricted
+dcx up --config-dir ~/.dcx --workspace-folder ~/testing-project --network host
 
 # The base image is shared: same devcontainer.json content → same image.
 # Changing devcontainer.json (e.g. bumping a package version) triggers a new build.
@@ -118,11 +150,13 @@ Three Dockerfiles are provided for different use cases:
 
 ```bash
 # Slim image (default) — start with:
-dcx up --workspace-folder . --config .devcontainer/slim/devcontainer.json
+dcx up --workspace-folder . --config-dir .devcontainer/slim
 
 # Full image — for the complete dev environment:
-dcx up --workspace-folder . --config .devcontainer/full/devcontainer.json
+dcx up --workspace-folder . --config-dir .devcontainer/full
 ```
+
+The `.devcontainer/full/` directory includes a `dcx_config.yaml` that mounts `~/.gitconfig` and `~/.claude.json` automatically.
 
 ## Building
 
