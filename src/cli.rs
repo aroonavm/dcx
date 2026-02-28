@@ -29,7 +29,8 @@ pub enum Commands {
         #[arg(long, value_name = "DIR")]
         config_dir: Option<PathBuf>,
 
-        /// Host file path to stage into the container (may be repeated)
+        /// Host file path to stage into the container (may be repeated).
+        /// Alternatively, declare files in .devcontainer/dcx_config.yaml with a 'files:' list
         #[arg(long = "file", value_name = "PATH")]
         files: Vec<PathBuf>,
 
