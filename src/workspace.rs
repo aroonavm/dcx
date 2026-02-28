@@ -14,8 +14,9 @@ pub fn resolve_workspace(given: Option<&Path>) -> Result<PathBuf, String> {
         None => std::env::current_dir()
             .map_err(|e| format!("Cannot determine current directory: {e}"))?,
     };
-    path.canonicalize()
-        .map_err(|_| format!("Workspace path does not exist: {}", path.display()))
+    path.canonicalize().map_err(|_| {
+        "Workspace directory does not exist. Use `dcx clean` to remove stale mounts.".to_string()
+    })
 }
 
 /// Detect a devcontainer configuration in `workspace`.
@@ -65,10 +66,13 @@ mod tests {
     }
 
     #[test]
-    fn resolve_workspace_error_message_contains_path() {
+    fn resolve_workspace_error_message_is_spec_compliant() {
         let path = Path::new("/nonexistent/dcx_test_path_xyz");
         let err = resolve_workspace(Some(path)).unwrap_err();
-        assert!(err.contains("nonexistent/dcx_test_path_xyz"), "got: {err}");
+        assert_eq!(
+            err,
+            "Workspace directory does not exist. Use `dcx clean` to remove stale mounts."
+        );
     }
 
     // --- find_devcontainer_config ---

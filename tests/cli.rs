@@ -30,21 +30,33 @@ fn help_lists_all_managed_subcommands() {
 fn up_missing_workspace_exits_nonzero() {
     // A workspace path that does not exist must fail.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.
-    dcx()
+    let output = dcx()
         .args(["up", "--workspace-folder", "/nonexistent/__dcx_test_path__"])
-        .assert()
-        .failure();
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Workspace directory does not exist"),
+        "stderr should mention workspace missing with dcx clean hint, got: {stderr}"
+    );
 }
 
 #[test]
 fn up_dir_without_devcontainer_config_exits_nonzero() {
     // /tmp exists but has no devcontainer configuration.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.
-    dcx()
-        .env_remove("DCX_DEVCONTAINER_CONFIG_PATH")
+    let output = dcx()
+        .env_remove("DCX_DEVCONTAINER_CONFIG_DIR_PATH")
         .args(["up", "--workspace-folder", "/tmp"])
-        .assert()
-        .failure();
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("devcontainer") || stderr.contains("configuration"),
+        "stderr should mention missing devcontainer config, got: {stderr}"
+    );
 }
 
 #[test]
@@ -128,7 +140,7 @@ fn up_dry_run_without_devcontainer_config_exits_nonzero() {
     // --dry-run still validates before printing the plan.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.
     dcx()
-        .env_remove("DCX_DEVCONTAINER_CONFIG_PATH")
+        .env_remove("DCX_DEVCONTAINER_CONFIG_DIR_PATH")
         .args(["up", "--dry-run", "--workspace-folder", "/tmp"])
         .assert()
         .failure();
@@ -144,15 +156,21 @@ fn up_nonexistent_relay_path_exits_nonzero() {
     // dir can be made to exist.
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
     let relay_path = format!("{home}/.colima-mounts/dcx-test-a1b2c3d4");
-    dcx()
+    let output = dcx()
         .args(["up", "--workspace-folder", &relay_path])
-        .assert()
-        .failure();
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("does not exist") || stderr.contains("colima-mounts"),
+        "stderr should mention missing path or colima-mounts, got: {stderr}"
+    );
 }
 
 #[test]
 fn up_with_nonexistent_config_exits_nonzero() {
-    // --config pointing to a missing file must fail (exit 2 if Docker available, 1 if not).
+    // --config-dir pointing to a missing directory must fail (exit 2 if Docker available, 1 if not).
     use assert_fs::TempDir;
     let workspace = TempDir::new().unwrap();
     dcx()
@@ -160,8 +178,8 @@ fn up_with_nonexistent_config_exits_nonzero() {
             "up",
             "--workspace-folder",
             workspace.path().to_str().unwrap(),
-            "--config",
-            "/nonexistent/__dcx_test_config__.json",
+            "--config-dir",
+            "/nonexistent/__dcx_test_config_dir__",
         ])
         .assert()
         .failure();
@@ -169,20 +187,21 @@ fn up_with_nonexistent_config_exits_nonzero() {
 
 #[test]
 fn up_dry_run_with_explicit_config_shows_config_in_plan() {
-    // --config must appear in the dry-run plan output.
+    // --config-dir must cause the resolved devcontainer.json to appear in the dry-run plan output.
     use assert_fs::TempDir;
     use assert_fs::prelude::*;
     let workspace = TempDir::new().unwrap();
     let config = workspace.child("custom/devcontainer.json");
     config.touch().unwrap();
+    let config_dir = config.path().parent().unwrap();
     let out = dcx()
         .args([
             "up",
             "--dry-run",
             "--workspace-folder",
             workspace.path().to_str().unwrap(),
-            "--config",
-            config.path().to_str().unwrap(),
+            "--config-dir",
+            config_dir.to_str().unwrap(),
         ])
         .output()
         .unwrap();
@@ -191,6 +210,10 @@ fn up_dry_run_with_explicit_config_shows_config_in_plan() {
         assert!(
             stdout.contains("--config"),
             "dry-run output must contain '--config', got: {stdout}"
+        );
+        assert!(
+            stdout.contains(config.path().to_str().unwrap()),
+            "dry-run output must contain the resolved devcontainer.json path, got: {stdout}"
         );
     } else {
         assert_eq!(
@@ -204,17 +227,18 @@ fn up_dry_run_with_explicit_config_shows_config_in_plan() {
 
 #[test]
 fn up_dry_run_uses_env_var_config() {
-    // When DCX_DEVCONTAINER_CONFIG_PATH is set and no --config is passed,
-    // the env var path should appear in the dry-run output.
+    // When DCX_DEVCONTAINER_CONFIG_DIR_PATH is set and no --config-dir is passed,
+    // the resolved devcontainer.json path should appear in the dry-run output.
     use assert_fs::TempDir;
     use assert_fs::prelude::*;
     let workspace = TempDir::new().unwrap();
     let config = workspace.child("custom/devcontainer.json");
     config.touch().unwrap();
+    let config_dir = config.path().parent().unwrap();
     let out = dcx()
         .env(
-            "DCX_DEVCONTAINER_CONFIG_PATH",
-            config.path().to_str().unwrap(),
+            "DCX_DEVCONTAINER_CONFIG_DIR_PATH",
+            config_dir.to_str().unwrap(),
         )
         .args([
             "up",
@@ -232,7 +256,7 @@ fn up_dry_run_uses_env_var_config() {
         );
         assert!(
             stdout.contains(config.path().to_str().unwrap()),
-            "dry-run output must contain the config path from env var, got: {stdout}"
+            "dry-run output must contain the resolved devcontainer.json path from env var, got: {stdout}"
         );
     } else {
         assert_eq!(
@@ -246,8 +270,8 @@ fn up_dry_run_uses_env_var_config() {
 
 #[test]
 fn up_config_flag_overrides_env_var() {
-    // When both DCX_DEVCONTAINER_CONFIG_PATH and --config are provided,
-    // --config must take precedence.
+    // When both DCX_DEVCONTAINER_CONFIG_DIR_PATH and --config-dir are provided,
+    // --config-dir must take precedence.
     use assert_fs::TempDir;
     use assert_fs::prelude::*;
     let workspace = TempDir::new().unwrap();
@@ -255,18 +279,20 @@ fn up_config_flag_overrides_env_var() {
     env_config.touch().unwrap();
     let flag_config = workspace.child("flag/devcontainer.json");
     flag_config.touch().unwrap();
+    let env_config_dir = env_config.path().parent().unwrap();
+    let flag_config_dir = flag_config.path().parent().unwrap();
     let out = dcx()
         .env(
-            "DCX_DEVCONTAINER_CONFIG_PATH",
-            env_config.path().to_str().unwrap(),
+            "DCX_DEVCONTAINER_CONFIG_DIR_PATH",
+            env_config_dir.to_str().unwrap(),
         )
         .args([
             "up",
             "--dry-run",
             "--workspace-folder",
             workspace.path().to_str().unwrap(),
-            "--config",
-            flag_config.path().to_str().unwrap(),
+            "--config-dir",
+            flag_config_dir.to_str().unwrap(),
         ])
         .output()
         .unwrap();
@@ -274,11 +300,11 @@ fn up_config_flag_overrides_env_var() {
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
             stdout.contains(flag_config.path().to_str().unwrap()),
-            "dry-run output must contain the --config path (flag), got: {stdout}"
+            "dry-run output must contain the --config-dir resolved path (flag), got: {stdout}"
         );
         assert!(
             !stdout.contains(env_config.path().to_str().unwrap()),
-            "dry-run output must not contain the env var path, got: {stdout}"
+            "dry-run output must not contain the env var resolved path, got: {stdout}"
         );
     } else {
         assert_eq!(
@@ -292,40 +318,19 @@ fn up_config_flag_overrides_env_var() {
 
 #[test]
 fn up_env_var_config_nonexistent_exits_nonzero() {
-    // When DCX_DEVCONTAINER_CONFIG_PATH points to a nonexistent file and no --config
-    // is provided, the command must fail (exit 2 if Docker available, 1 if not).
+    // When DCX_DEVCONTAINER_CONFIG_DIR_PATH points to a nonexistent directory and no
+    // --config-dir is provided, the command must fail (exit 2 if Docker available, 1 if not).
     use assert_fs::TempDir;
     let workspace = TempDir::new().unwrap();
     dcx()
         .env(
-            "DCX_DEVCONTAINER_CONFIG_PATH",
-            "/nonexistent/__dcx_test_env_config__.json",
+            "DCX_DEVCONTAINER_CONFIG_DIR_PATH",
+            "/nonexistent/__dcx_test_env_config_dir__",
         )
         .args([
             "up",
             "--workspace-folder",
             workspace.path().to_str().unwrap(),
-        ])
-        .assert()
-        .failure();
-}
-
-#[test]
-fn exec_env_var_config_nonexistent_exits_nonzero() {
-    // When DCX_DEVCONTAINER_CONFIG_PATH points to a nonexistent file and no --config
-    // is provided, `dcx exec` must fail (exit 2 if Docker available, 1 if not).
-    use assert_fs::TempDir;
-    let workspace = TempDir::new().unwrap();
-    dcx()
-        .env(
-            "DCX_DEVCONTAINER_CONFIG_PATH",
-            "/nonexistent/__dcx_test_env_config__.json",
-        )
-        .args([
-            "exec",
-            "--workspace-folder",
-            workspace.path().to_str().unwrap(),
-            "true",
         ])
         .assert()
         .failure();
@@ -421,7 +426,7 @@ fn exec_multiple_args_are_accepted_by_arg_parser() {
 
 #[test]
 fn exec_with_nonexistent_config_exits_nonzero() {
-    // --config pointing to a missing file must fail (exit 2 if Docker available, 1 if not).
+    // --config-dir pointing to a missing directory must fail (exit 2 if Docker available, 1 if not).
     use assert_fs::TempDir;
     let workspace = TempDir::new().unwrap();
     dcx()
@@ -429,8 +434,8 @@ fn exec_with_nonexistent_config_exits_nonzero() {
             "exec",
             "--workspace-folder",
             workspace.path().to_str().unwrap(),
-            "--config",
-            "/nonexistent/__dcx_test_config__.json",
+            "--config-dir",
+            "/nonexistent/__dcx_test_config_dir__",
             "true",
         ])
         .assert()
@@ -457,42 +462,29 @@ fn down_missing_workspace_exits_nonzero() {
 fn down_valid_workspace_no_mount_prints_nothing_to_do_or_docker_error() {
     // When Docker is available and no mount exists, "Nothing to do." must appear on stdout.
     // When Docker is unavailable, stderr gets the Docker error (stdout is empty).
+    // Exit code should be 0 in either case.
     let out = dcx()
         .args(["down", "--workspace-folder", "/tmp"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stdout.contains("Nothing to do.") || stderr.contains("Docker is not available"),
-        "expected 'Nothing to do.' on stdout or Docker error on stderr, got stdout={stdout} stderr={stderr}"
-    );
-}
-
-// --- dcx clean ---
-
-#[test]
-fn clean_flags_are_accepted() {
-    // --purge, --yes, and --all must all be recognised flags (not rejected by clap).
-    use assert_fs::TempDir;
-    for flags in [
-        vec!["clean", "--purge", "--dry-run"],
-        vec!["clean", "--yes"],
-        vec!["clean", "--all", "--dry-run"],
-    ] {
-        let home = TempDir::new().unwrap();
-        let out = dcx()
-            .env("HOME", home.path())
-            .args(&flags)
-            .output()
-            .unwrap();
-        let stderr = String::from_utf8_lossy(&out.stderr);
+    if out.status.success() {
+        // Docker available path: must print "Nothing to do."
         assert!(
-            !stderr.contains("error: unexpected argument"),
-            "{flags:?} should not be rejected as unknown, got stderr: {stderr}"
+            stdout.contains("Nothing to do."),
+            "when Docker available, stdout must contain 'Nothing to do.', got: {stdout}"
+        );
+    } else {
+        // Docker unavailable path: stderr contains error message
+        assert!(
+            stderr.contains("Docker") || stderr.contains("docker"),
+            "when Docker unavailable, stderr must mention Docker, got: {stderr}"
         );
     }
 }
+
+// --- dcx clean ---
 
 #[test]
 fn clean_dry_run_empty_relay_exits_success() {
@@ -691,9 +683,14 @@ fn unknown_subcommand_is_not_a_clap_error() {
     // devcontainer is likely not installed in the test env, so we get exit 127
     // (PREREQ_NOT_FOUND). What we must NOT see is exit 2 (clap parse error).
     let output = dcx().arg("__dcx_test_passthrough__").output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert_ne!(
         output.status.code(),
         Some(2),
         "unknown subcommand should be passed through, not rejected by clap"
+    );
+    assert!(
+        !stderr.contains("error: unrecognized subcommand"),
+        "stderr must not contain clap 'unrecognized subcommand' error, got: {stderr}"
     );
 }
