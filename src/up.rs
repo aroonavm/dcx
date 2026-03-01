@@ -911,11 +911,8 @@ pub fn run_up(
         // Collect files from dcx_config.yaml and --file CLI flag.
         let explicit_files: Vec<PathBuf> = {
             let mut v: Vec<PathBuf> = extra_files.to_vec();
-            if let Some(ref dir) = dcx_config_dir {
-                let cfg = dcx_config::read_dcx_config(&dir.join("dcx_config.yaml"));
-                for loc in &cfg.up.files {
-                    v.push(colima::expand_tilde(loc, home));
-                }
+            for loc in &up_cfg.files {
+                v.push(colima::expand_tilde(loc, home));
             }
             v
         };
