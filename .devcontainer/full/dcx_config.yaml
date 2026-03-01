@@ -1,3 +1,4 @@
-files:
-  - path: ~/.gitconfig
-  - path: ~/.claude.json
+up:
+  files:
+    - path: ~/.gitconfig
+    - path: ~/.claude.json

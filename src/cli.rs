@@ -48,8 +48,8 @@ pub enum Commands {
         /// - minimal: dev tools only (GitHub, npm, Anthropic) [default]
         /// - host: allow host network only
         /// - open: unrestricted access
-        #[arg(long, value_name = "MODE", default_value = "minimal")]
-        network: NetworkMode,
+        #[arg(long, value_name = "MODE")]
+        network: Option<NetworkMode>,
     },
 
     /// Run a command inside the devcontainer

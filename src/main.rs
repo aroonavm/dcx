@@ -48,10 +48,6 @@ fn main() {
                     .ok()
                     .map(std::path::PathBuf::from)
             });
-            // SAFETY: single-threaded at this point; set before spawning devcontainer
-            unsafe {
-                std::env::set_var("DCX_NETWORK_MODE", network.to_string());
-            }
             std::process::exit(up::run_up(
                 &home_dir(),
                 workspace_folder,
@@ -59,6 +55,7 @@ fn main() {
                 &files,
                 dry_run,
                 yes,
+                network,
             ));
         }
         cli::Commands::Exec {

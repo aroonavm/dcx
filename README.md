@@ -59,9 +59,11 @@ Mount specific host files into containers via a `dcx_config.yaml` file or the `-
 Create `.devcontainer/dcx_config.yaml` (or `dcx_config.yaml` in your project root):
 
 ```yaml
-files:
-  - path: ~/.gitconfig
-  - path: ~/.claude.json
+up:
+  network: minimal
+  files:
+    - path: ~/.gitconfig
+    - path: ~/.claude.json
 ```
 
 Then:
@@ -70,7 +72,7 @@ Then:
 dcx up --workspace-folder .
 ```
 
-These files are hardlinked into the container (writes propagate back to host), or copied as readonly if on a different filesystem.
+These files are hardlinked into the container (writes propagate back to host), or copied as readonly if on a different filesystem. For the full configuration reference including merge behavior and discovery rules, see [Configuration Reference](specs/dcx_config.md).
 
 **Option 2: CLI flag**
 

@@ -9,6 +9,7 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
 | I want to... | Read this |
 |--------------|-----------|
 | **Understand how dcx works** | [architecture.md](architecture.md) — Problem, solution, all command specs |
+| **Configure `dcx_config.yaml`** | [dcx_config.md](dcx_config.md) — Schema, merge behavior, discovery, examples |
 | **Implement a feature** | [architecture.md](architecture.md) + relevant HOW spec (mount-strategy, clean-command, docker-helpers) |
 | **Install dcx** | [guides/setup.md](guides/setup.md) — Prerequisites, setup steps |
 | **Fix a problem** | [guides/failure-recovery.md](guides/failure-recovery.md) — Common errors |
@@ -33,6 +34,7 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
 └── specs/
     ├── README.md          ← You are here
     ├── architecture.md    ← WHAT (behaviors, commands, edge cases)
+    ├── dcx_config.md      ← Configuration reference (schema, merge, discovery)
     ├── mount-strategy.md  ← HOW (bindfs implementation)
     ├── clean-command.md   ← HOW (clean logic, volumes)
     ├── docker-helpers.md  ← HOW (docker wrappers)

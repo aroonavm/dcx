@@ -87,7 +87,7 @@ dcx up [--workspace-folder PATH] [--config-dir DIR] [--file PATH]... [--network 
 10. If mount exists: verify health + source matches (idempotent), else recover from stale
 11. If mount missing: create + mount with `bindfs --no-allow-other`
 12. If workspace not owned by user: warn + prompt (skip with `--yes`)
-13. Discover mounts from `colima.yaml`: read colima config, extract mounts, filter out `~/.colima-mounts`, expand tilde paths, and check which host paths exist. For directory mounts, build bind mount entries (source == target == original host path). For file mounts, stage via hardlink into `~/.colima-mounts/.dcx-<name>-files/` (see file staging below). Build environment variable overrides for well-known apps (git, claude). Also process files from `dcx_config.yaml` (in the `--config-dir` directory) and `--file` flags via the same file staging mechanism. Create override-config JSON mapping `workspaceMount` and `workspaceFolder` to the original workspace path, plus the discovered mounts and env vars. Pass `--workspace-folder` → mount point (relay path) and `--override-config` → override JSON. Forward `--config` (resolved `devcontainer.json`) if provided.
+13. Discover mounts from `colima.yaml`: read colima config, extract mounts, filter out `~/.colima-mounts`, expand tilde paths, and check which host paths exist. For directory mounts, build bind mount entries (source == target == original host path). For file mounts, stage via hardlink into `~/.colima-mounts/.dcx-<name>-files/` (see file staging below). Build environment variable overrides for well-known apps (git, claude). Merge config settings (network, yes, files) from `dcx_config.yaml` using discovery order (see [dcx_config.md](dcx_config.md)). Also process files from CLI `--file` flags via the same file staging mechanism. Create override-config JSON mapping `workspaceMount` and `workspaceFolder` to the original workspace path, plus the discovered mounts and env vars. Pass `--workspace-folder` → mount point (relay path) and `--override-config` → override JSON. Forward `--config` (resolved `devcontainer.json`) if provided.
 13.5. Network mode enforcement: check if any existing containers have a mismatched `dcx.network-mode` label. If found, stop and remove them so `devcontainer up` creates a fresh container with the requested mode. Handles containers that survived `dcx down` for any reason (e.g., FUSE mount disappeared but container remained).
 14. Delegate to `devcontainer up` (devcontainer stamps container with label `dcx.network-mode=<mode>`)
 15. On failure: rollback (unmount + remove dir), exit 1
@@ -104,16 +104,18 @@ Colima cannot mount individual files into the VM — only directories. To make i
 
 Files can be declared in three ways:
 - Colima mounts (`colima.yaml`): if a mount entry resolves to a file (not directory), it is staged
-- Per-project config: `dcx_config.yaml` alongside `devcontainer.json` with `files:` list
+- Per-project config: `dcx_config.yaml` alongside `devcontainer.json` with `up.files:` list (see [dcx_config.md](dcx_config.md) for full schema)
 - Ad-hoc: `dcx up --file PATH`
 
 **Examples:**
 
-`dcx_config.yaml` (per-project, plural `files:` key):
+`dcx_config.yaml` (per-project, nested `up.files:` key):
 ```yaml
-files:
-  - path: ~/.gitconfig
-  - path: ~/.claude.json
+up:
+  network: minimal
+  files:
+    - path: ~/.gitconfig
+    - path: ~/.claude.json
 ```
 
 CLI flag (ad-hoc, singular `--file`, repeatable):
@@ -121,7 +123,7 @@ CLI flag (ad-hoc, singular `--file`, repeatable):
 dcx up --file ~/.gitconfig --file ~/.claude.json
 ```
 
-Both achieve the same result: files are hardlinked into the container's original host paths.
+Both achieve the same result: files are hardlinked into the container's original host paths. See [dcx_config.md](dcx_config.md) for configuration reference, merge behavior, and discovery rules.
 
 ---
 

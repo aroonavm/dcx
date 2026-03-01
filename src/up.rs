@@ -13,6 +13,7 @@ use crate::docker;
 use crate::exit_codes;
 use crate::mount_table;
 use crate::naming::{is_dcx_managed_path, mount_name, relay_dir};
+use crate::network_mode::NetworkMode;
 use crate::platform;
 use crate::progress;
 use crate::signals;
@@ -592,6 +593,7 @@ pub fn run_up(
     extra_files: &[PathBuf],
     dry_run: bool,
     yes: bool,
+    cli_network: Option<NetworkMode>,
 ) -> i32 {
     // Install SIGINT handler before any mount operations so Ctrl+C triggers rollback
     // rather than leaving an orphaned mount.
@@ -644,6 +646,56 @@ pub fn run_up(
             (None, None)
         };
 
+    // 2c. Merge network and yes settings from dcx_config.yaml.
+    // Config discovery: check --config-dir, then alongside devcontainer.json, then workspace fallback.
+    let cfg_path = if let Some(ref dir) = dcx_config_dir {
+        Some(dir.join("dcx_config.yaml"))
+    } else if let Some(ref json) = devcontainer_config {
+        json.parent().map(|p| p.join("dcx_config.yaml"))
+    } else {
+        dcx_config::find_dcx_config(&workspace)
+    };
+    let cfg = cfg_path
+        .map(|p| dcx_config::read_dcx_config(&p))
+        .unwrap_or_default();
+    let up_cfg = &cfg.up;
+
+    // Merge network: YAML wins over CLI, with warning if both present and different.
+    let final_network: NetworkMode = match (up_cfg.network.as_deref(), cli_network) {
+        (Some(yaml_val), Some(cli_val)) => {
+            let yaml_mode = match yaml_val.parse::<NetworkMode>() {
+                Ok(mode) => mode,
+                Err(e) => {
+                    eprintln!("Warning: dcx_config.yaml up.network: {}", e);
+                    NetworkMode::default()
+                }
+            };
+            if yaml_mode != cli_val {
+                eprintln!(
+                    "Warning: up.network from dcx_config.yaml ({}) overrides --network {}",
+                    yaml_mode, cli_val
+                );
+            }
+            yaml_mode
+        }
+        (Some(yaml_val), None) => match yaml_val.parse::<NetworkMode>() {
+            Ok(mode) => mode,
+            Err(e) => {
+                eprintln!("Warning: dcx_config.yaml up.network: {}", e);
+                NetworkMode::default()
+            }
+        },
+        (None, Some(cli_val)) => cli_val,
+        (None, None) => NetworkMode::default(),
+    };
+    // SAFETY: single-threaded at this point; set before spawning devcontainer
+    unsafe {
+        std::env::set_var("DCX_NETWORK_MODE", final_network.to_string());
+    }
+
+    // Merge yes: OR-combine (true from either source).
+    let final_yes = yes || up_cfg.yes.unwrap_or(false);
+
     // 3. Recursive mount guard — block nested dcx mounts.
     let relay = relay_dir(home);
     if is_dcx_managed_path(&workspace, &relay) {
@@ -689,8 +741,8 @@ pub fn run_up(
         return exit_codes::RUNTIME_ERROR;
     }
 
-    // 8. Non-owned directory warning — prompt unless --yes.
-    if !yes {
+    // 8. Non-owned directory warning — prompt unless --yes (or up.yes from config).
+    if !final_yes {
         #[cfg(unix)]
         if let (Some(fuid), Some(cuid)) = (file_uid(&workspace), current_uid())
             && fuid != cuid
@@ -861,8 +913,8 @@ pub fn run_up(
             let mut v: Vec<PathBuf> = extra_files.to_vec();
             if let Some(ref dir) = dcx_config_dir {
                 let cfg = dcx_config::read_dcx_config(&dir.join("dcx_config.yaml"));
-                for loc in cfg.files {
-                    v.push(colima::expand_tilde(&loc, home));
+                for loc in &cfg.up.files {
+                    v.push(colima::expand_tilde(loc, home));
                 }
             }
             v
