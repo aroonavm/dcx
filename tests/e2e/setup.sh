@@ -162,7 +162,11 @@ make_workspace() {
     mkdir -p "$tmpdir/.devcontainer"
     cat >"$tmpdir/.devcontainer/devcontainer.json" <<'EOF'
 {
-    "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "containerUser": "vscode",
+    "runArgs": [
+        "--label", "dcx.network-mode=${localEnv:DCX_NETWORK_MODE:minimal}"
+    ]
 }
 EOF
     echo "$tmpdir" >> "$_CLEANUP_LIST"
