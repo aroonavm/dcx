@@ -20,8 +20,9 @@ echo "host content" > "$TEST_FILE"
 
 # Write dcx_config.yaml into the workspace's .devcontainer dir.
 cat > "$WS/.devcontainer/dcx_config.yaml" <<EOF
-files:
-  - path: $TEST_FILE
+up:
+  files:
+    - path: $TEST_FILE
 EOF
 
 trap '

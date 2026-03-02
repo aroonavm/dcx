@@ -15,7 +15,9 @@ build:
 	cargo build
 
 e2e:
-	@for script in tests/e2e/test_*.sh; do \
+	@exit_code=0; \
+	for script in tests/e2e/test_*.sh; do \
 		echo "--- $$script ---"; \
-		bash "$$script"; \
-	done
+		bash "$$script" || exit_code=$$?; \
+	done; \
+	exit $$exit_code
