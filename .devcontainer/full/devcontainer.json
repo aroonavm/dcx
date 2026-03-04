@@ -44,12 +44,10 @@
     },
     "remoteUser": "rust",
     "mounts": [
-        "source=dcx-shellhistory-${devcontainerId},target=/commandhistory,type=volume",
-        "source=${localEnv:HOME}/.claude,target=${localEnv:HOME}/.claude,type=bind",
+        "source=dcx-shellhistory-${devcontainerId},target=/commandhistory,type=volume"
     ],
     "containerEnv": {
         "RUST_BACKTRACE": "1",
-        "CLAUDE_CONFIG_DIR": "${localEnv:HOME}/.claude",
         "GIT_CONFIG_GLOBAL": "${localEnv:HOME}/.gitconfig",
         "POWERLEVEL9K_DISABLE_GITSTATUS": "true",
         "DCX_NETWORK_MODE": "${localEnv:DCX_NETWORK_MODE:minimal}"

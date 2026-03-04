@@ -7,6 +7,8 @@ use serde::Deserialize;
 #[derive(Deserialize, Default)]
 struct DcxFileRaw {
     path: String,
+    #[serde(default)]
+    sync: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -29,6 +31,14 @@ struct DcxConfigRaw {
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct FileMount {
+    /// Raw file path (may contain `~`). Expansion happens at call site.
+    pub path: String,
+    /// Whether to sync this file bidirectionally between host and container.
+    pub sync: bool,
+}
+
 #[derive(Debug, PartialEq, Default)]
 pub struct DcxUpConfig {
     /// Network isolation level (validated at call site). None means not set.
@@ -37,8 +47,8 @@ pub struct DcxUpConfig {
     /// Skip confirmation prompts. None means not set.
     pub yes: Option<bool>,
 
-    /// Raw file location strings (may contain `~`). Expansion happens at call site.
-    pub files: Vec<String>,
+    /// File mounts (paths may contain `~`). Expansion happens at call site.
+    pub files: Vec<FileMount>,
 }
 
 #[derive(Debug, PartialEq, Default)]
@@ -56,7 +66,15 @@ pub fn parse_dcx_config(yaml: &str) -> DcxConfig {
             up: DcxUpConfig {
                 network: raw.up.network,
                 yes: raw.up.yes,
-                files: raw.up.files.into_iter().map(|f| f.path).collect(),
+                files: raw
+                    .up
+                    .files
+                    .into_iter()
+                    .map(|f| FileMount {
+                        path: f.path,
+                        sync: f.sync,
+                    })
+                    .collect(),
             },
         },
         Err(_) => DcxConfig::default(),
@@ -96,7 +114,19 @@ mod tests {
     fn parse_dcx_config_reads_up_files_list() {
         let yaml = "up:\n  files:\n    - path: ~/.gitconfig\n    - path: ~/.claude.json\n";
         let cfg = parse_dcx_config(yaml);
-        assert_eq!(cfg.up.files, vec!["~/.gitconfig", "~/.claude.json"]);
+        assert_eq!(
+            cfg.up.files,
+            vec![
+                FileMount {
+                    path: "~/.gitconfig".to_string(),
+                    sync: false
+                },
+                FileMount {
+                    path: "~/.claude.json".to_string(),
+                    sync: false
+                },
+            ]
+        );
     }
 
     #[test]
@@ -124,7 +154,22 @@ mod tests {
         let yaml = "up:\n  files:\n    - path: ~/.gitconfig\n";
         let cfg = parse_dcx_config(yaml);
         // Tilde expansion is the caller's responsibility
-        assert_eq!(cfg.up.files[0], "~/.gitconfig");
+        assert_eq!(cfg.up.files[0].path, "~/.gitconfig");
+    }
+
+    #[test]
+    fn parse_dcx_config_file_sync_defaults_to_false() {
+        let yaml = "up:\n  files:\n    - path: ~/.gitconfig\n";
+        let cfg = parse_dcx_config(yaml);
+        assert_eq!(cfg.up.files[0].sync, false);
+    }
+
+    #[test]
+    fn parse_dcx_config_file_sync_true_when_specified() {
+        let yaml = "up:\n  files:\n    - path: ~/.claude.json\n      sync: true\n";
+        let cfg = parse_dcx_config(yaml);
+        assert_eq!(cfg.up.files[0].path, "~/.claude.json");
+        assert_eq!(cfg.up.files[0].sync, true);
     }
 
     #[test]
@@ -162,7 +207,13 @@ mod tests {
         let path = dir.path().join("dcx_config.yaml");
         std::fs::write(&path, "up:\n  files:\n    - path: ~/.gitconfig\n").unwrap();
         let cfg = read_dcx_config(&path);
-        assert_eq!(cfg.up.files, vec!["~/.gitconfig"]);
+        assert_eq!(
+            cfg.up.files,
+            vec![FileMount {
+                path: "~/.gitconfig".to_string(),
+                sync: false
+            }]
+        );
     }
 
     // --- find_dcx_config ---

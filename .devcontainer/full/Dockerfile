@@ -27,7 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   dnsutils \
   aggregate \
   jq \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
+  locales \
+  && apt-get clean && rm -rf /var/lib/apt/lists/* \
+  && locale-gen en_US.UTF-8
 
 # Install Rust toolchain to a shared location
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
@@ -77,6 +79,8 @@ USER rust
 ENV SHELL=/bin/zsh
 ENV EDITOR=nano
 ENV VISUAL=nano
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
 # Add Rust tools and Claude Code to PATH
 ENV PATH="/home/rust/.local/bin:/opt/rust-tools/bin:$PATH"
 

@@ -14,12 +14,12 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
 | **Install dcx** | [guides/setup.md](guides/setup.md) — Prerequisites, setup steps |
 | **Fix a problem** | [guides/failure-recovery.md](guides/failure-recovery.md) — Common errors |
 | **Write tests** | [guides/testing.md](guides/testing.md) — Test strategy + pyramid |
-| **Start development** | Read [../AGENTS.md](../AGENTS.md) and [../TODO.md](../TODO.md) |
+| **Start development** | Read [../AGENTS.md](../AGENTS.md) and [TODO.md](TODO.md) |
 
 ## Key Facts
 
 - **Single binary:** Rust (no shell deps, cross-platform Linux + macOS)
-- **7 commands:** up, exec, down, clean, status, doctor + pass-through
+- **8 commands:** up, exec, down, clean, status, doctor, completions + pass-through
 - **Multi-workspace:** Each mount isolated (agent A can't access project B)
 - **No state files:** Filesystem is source of truth (naming convention)
 - **Idempotent:** Safe to call commands multiple times
@@ -33,6 +33,7 @@ Wrapper for `devcontainer` that solves: Colima mounts are static (set in `colima
 ├── TODO.md ← Work tracking (phases completed, current status)
 └── specs/
     ├── README.md          ← You are here
+    ├── TODO.md            ← Work tracking (phases completed, current status)
     ├── architecture.md    ← WHAT (behaviors, commands, edge cases)
     ├── dcx_config.md      ← Configuration reference (schema, merge, discovery)
     ├── mount-strategy.md  ← HOW (bindfs implementation)

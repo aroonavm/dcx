@@ -12,6 +12,8 @@ pub struct StatusRow {
     pub network: Option<String>,
     /// Human-readable state string (e.g. `running`, `stale mount`).
     pub state: String,
+    /// Sync daemon status (e.g. `running`, `stopped`, or `–` if N/A).
+    pub daemon: String,
 }
 
 /// Format the `dcx status` output table.
@@ -22,8 +24,8 @@ pub fn format_status_table(rows: &[StatusRow]) -> String {
         return "No active workspaces.".to_string();
     }
     let header = format!(
-        "{:<30} {:<30} {:<12} {:<12} {}",
-        "WORKSPACE", "MOUNT", "CONTAINER", "NETWORK", "STATE"
+        "{:<30} {:<30} {:<12} {:<12} {:<10} {}",
+        "WORKSPACE", "MOUNT", "CONTAINER", "NETWORK", "DAEMON", "STATE"
     );
     let mut lines = vec![header];
     for row in rows {
@@ -31,8 +33,8 @@ pub fn format_status_table(rows: &[StatusRow]) -> String {
         let container = row.container.as_deref().unwrap_or("(none)");
         let network = row.network.as_deref().unwrap_or("–");
         lines.push(format!(
-            "{:<30} {:<30} {:<12} {:<12} {}",
-            workspace, row.mount, container, network, row.state
+            "{:<30} {:<30} {:<12} {:<12} {:<10} {}",
+            workspace, row.mount, container, network, row.daemon, row.state
         ));
     }
     lines.join("\n")
@@ -185,6 +187,7 @@ mod tests {
             container: Some("abc123".to_string()),
             network: Some("minimal".to_string()),
             state: "running".to_string(),
+            daemon: "running".to_string(),
         }];
         let out = format_status_table(&rows);
         assert!(out.contains("WORKSPACE"), "missing WORKSPACE header");
@@ -202,6 +205,7 @@ mod tests {
             container: Some("abc123".to_string()),
             network: Some("minimal".to_string()),
             state: "running".to_string(),
+            daemon: "running".to_string(),
         }];
         let out = format_status_table(&rows);
         assert!(out.contains("/home/user/project-a"));
@@ -219,6 +223,7 @@ mod tests {
             container: Some("abc123".to_string()),
             network: Some("minimal".to_string()),
             state: "running".to_string(),
+            daemon: "running".to_string(),
         }];
         let out = format_status_table(&rows);
         let mut lines = out.lines();
@@ -240,6 +245,7 @@ mod tests {
             container: None,
             network: None,
             state: "stale mount".to_string(),
+            daemon: "–".to_string(),
         }];
         let out = format_status_table(&rows);
         assert!(out.contains("(unknown)"));
@@ -256,6 +262,7 @@ mod tests {
                 container: Some("abc123".to_string()),
                 network: Some("minimal".to_string()),
                 state: "running".to_string(),
+                daemon: "running".to_string(),
             },
             StatusRow {
                 workspace: Some("/home/user/project-b".to_string()),
@@ -263,6 +270,7 @@ mod tests {
                 container: None,
                 network: Some("open".to_string()),
                 state: "orphaned".to_string(),
+                daemon: "stopped".to_string(),
             },
         ];
         let out = format_status_table(&rows);

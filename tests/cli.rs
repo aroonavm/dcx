@@ -136,6 +136,42 @@ fn up_network_flag_is_accepted() {
 }
 
 #[test]
+fn up_no_cache_flag_is_accepted() {
+    // `dcx up --no-cache --dry-run` must not fail with exit 2 (clap parse error).
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+    let workspace = TempDir::new().unwrap();
+    workspace
+        .child(".devcontainer/devcontainer.json")
+        .touch()
+        .unwrap();
+    let out = dcx()
+        .args([
+            "up",
+            "--no-cache",
+            "--dry-run",
+            "--workspace-folder",
+            workspace.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let exit_code = out.status.code();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        exit_code == Some(0) || exit_code == Some(1),
+        "expected exit 0 or 1, got {exit_code:?}; stderr: {stderr}"
+    );
+    // When dry-run succeeds, the plan should show --build-no-cache
+    if exit_code == Some(0) {
+        assert!(
+            stdout.contains("--build-no-cache"),
+            "dry-run plan should show --build-no-cache; stdout: {stdout}"
+        );
+    }
+}
+
+#[test]
 fn up_dry_run_without_devcontainer_config_exits_nonzero() {
     // --dry-run still validates before printing the plan.
     // exit 1 if Docker is unavailable; exit 2 if Docker is available.

@@ -4,41 +4,44 @@
 
 ### Query Container
 ```rust
-fn find_container_by_label(label: &str, value: &str) -> Result<Option<ContainerId>>
+fn query_container(mount_point: &Path) -> Option<String>
+fn query_container_any(mount_point: &Path) -> Vec<String>
 ```
-Find container by `devcontainer.local_folder` label. Returns None if not found (idempotent).
+Query containers by `devcontainer.local_folder` label. `query_container` returns the first match; `query_container_any` returns all matching containers. Returns empty if none found (idempotent).
 
 ### Stop Container
 ```rust
-fn stop_container(container_id: &str) -> Result<()>
+fn stop_container(mount_point: &Path) -> Result<(), String>
 ```
-Stop running container. Safe to call on stopped container (returns success). Uses `docker stop` with timeout.
+Stop running container by mount point. Queries the container by `devcontainer.local_folder` label, then stops it. Safe to call when no container exists (returns success). Uses `docker stop` with timeout.
 
 ### Remove Container
 ```rust
-fn remove_container(container_id: &str, force: bool) -> Result<()>
+fn remove_container(container_id: &str) -> Result<(), String>
 ```
-Remove container. With `force=true`, kills running container. With `force=false`, fails if running.
+Remove container by ID. Always uses `docker rm --force` to remove even if running. Idempotent — fails silently if container not found.
 
 ## Image Operations
 
 ### Query Image
 ```rust
-fn get_image_id(image_name: &str) -> Result<Option<ImageId>>
+fn get_image_id(container_id: &str) -> Result<String, String>
+fn get_runtime_image_ref(container_id: &str) -> Result<String, String>
 ```
-Get image ID from name. Returns None if not found (idempotent).
+Inspect a container by ID to get its image ID or image reference. Used to find which image a container is running from. Returns error if container not found or image cannot be determined.
 
 ### Remove Image
 ```rust
-fn remove_image(image_id: &str, force: bool) -> Result<()>
+fn remove_image(image_id: &str) -> Result<(), String>
+fn remove_runtime_image(image_id: &str) -> Result<(), String>
 ```
-Remove image. With `force=false`, fails if other images depend on it. With `force=true`, removes regardless.
+Remove Docker image by ID or reference. Always uses `--force` flag. `remove_image` removes by ID; `remove_runtime_image` removes by image reference (sha256:... or repo:tag). Idempotent — fails silently if image not found.
 
 ### Build Image Name Detection
 ```rust
-fn get_base_image_name(workspace: &Path) -> Option<String>
+fn get_base_image_name(workspace: &Path, config: Option<&Path>) -> Option<String>
 ```
-Read `image` field from devcontainer.json. Returns None if not specified or file not found.
+Read `image` field from devcontainer.json. Searches for the config file in: explicit `config` path (if provided), then `.devcontainer/devcontainer.json` in the workspace, then `.devcontainer.json` at the workspace root. Returns None if not specified in any found config or no config exists.
 
 ### Base Image Tagging
 During `dcx up`, the base image is tagged as `dcx-base:<mount-name>` so that `dcx clean --purge` can find and remove it by convention — no need to resolve workspace paths.
@@ -79,7 +82,7 @@ List volumes matching a name prefix filter via `docker volume ls --filter name=<
 ```rust
 fn clean_orphaned_build_images() -> Result<usize>
 ```
-Remove all `vsc-*` build images (no `-uid` suffix) with no containers. Used by `--all --purge` as a final sweep to catch build images whose containers were already removed externally. Returns count removed. Non-fatal per image.
+Remove all `vsc-*` build images (no `-uid` suffix) that have no running containers and whose corresponding runtime image (with `-uid` suffix) no longer has running containers. Used by `--all --purge` as a final sweep to catch build images whose containers were already removed externally. Returns count removed. Non-fatal per image.
 
 ### Clean All DCX Volumes
 ```rust

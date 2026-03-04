@@ -2,3 +2,4 @@ up:
   files:
     - path: ~/.gitconfig
     - path: ~/.claude.json
+      sync: true

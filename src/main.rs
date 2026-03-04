@@ -18,6 +18,7 @@ mod platform;
 mod progress;
 mod signals;
 mod status;
+mod sync;
 mod up;
 mod workspace;
 
@@ -42,6 +43,7 @@ fn main() {
             dry_run,
             yes,
             network,
+            no_cache,
         } => {
             let config_dir = config_dir.or_else(|| {
                 std::env::var("DCX_DEVCONTAINER_CONFIG_DIR_PATH")
@@ -50,12 +52,15 @@ fn main() {
             });
             std::process::exit(up::run_up(
                 &home_dir(),
-                workspace_folder,
-                config_dir,
-                &files,
-                dry_run,
-                yes,
-                network,
+                up::UpOptions {
+                    workspace_folder,
+                    config_dir,
+                    extra_files: files,
+                    dry_run,
+                    yes,
+                    cli_network: network,
+                    no_cache,
+                },
             ));
         }
         cli::Commands::Exec {
@@ -102,6 +107,18 @@ fn main() {
         }
         cli::Commands::Completions { shell } => {
             std::process::exit(completions::run_completions(shell));
+        }
+        cli::Commands::SyncDaemon {
+            sources,
+            stagings,
+            pid_file,
+        } => {
+            let sync_pairs = sources
+                .into_iter()
+                .zip(stagings)
+                .map(|(source, staging)| sync::SyncPair { source, staging })
+                .collect();
+            sync::run_sync_daemon(sync_pairs, pid_file);
         }
         cli::Commands::External(args) => {
             let code =

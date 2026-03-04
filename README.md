@@ -27,7 +27,7 @@ Installs to `/usr/local/bin` by default. Override with `DCX_BIN_DIR=~/.local/bin
 
 ```bash
 # Setup (one time)
-sudo apt install bindfs        # Linux — see specs/setup.md for macOS
+sudo apt install bindfs        # Linux — see specs/guides/setup.md for macOS
 # Edit ~/.config/colima/default/colima.yaml to mount ~/.colima-mounts
 colima stop && colima start
 
@@ -62,8 +62,9 @@ Create `.devcontainer/dcx_config.yaml` (or `dcx_config.yaml` in your project roo
 up:
   network: minimal
   files:
-    - path: ~/.gitconfig
-    - path: ~/.claude.json
+    - path: ~/.gitconfig                    # Hardlinked: static config, writes propagate to host
+    - path: ~/.claude.json                  # Live-synced: keeps file in sync via inotify/FSEvents
+      sync: true
 ```
 
 Then:
@@ -72,7 +73,23 @@ Then:
 dcx up --workspace-folder .
 ```
 
-These files are hardlinked into the container (writes propagate back to host), or copied as readonly if on a different filesystem. For the full configuration reference including merge behavior and discovery rules, see [Configuration Reference](specs/dcx_config.md).
+**File mounting strategies:**
+
+- **Standard files** (`sync: false` or omitted): Hardlinked into the container (writes propagate back to host), or copied as readonly if on a different filesystem. Works well for config files that don't change frequently.
+
+- **Live-synced files** (`sync: true`): Content is copied to a staging directory and kept in sync bidirectionally via a background daemon. Perfect for authentication files like `~/.claude.json` that may be updated atomically by the host application. The daemon uses inotify (Linux) / FSEvents (macOS) for immediate change detection, with SHA256-based debouncing to avoid spurious syncs.
+
+**When to use `sync: true`:**
+- Authentication/credential files that apps write atomically (temp+rename)
+- Files that change while the container is running and the container needs the latest version
+- Example: `~/.claude.json` (Claude Code writes atomically on auth changes)
+
+**When to use standard mounting:**
+- Static config files (git, ssh config)
+- Files that rarely change after container start
+- Files that should be bidirectionally linked (hard/soft links)
+
+For the full configuration reference including merge behavior and discovery rules, see [Configuration Reference](specs/dcx_config.md).
 
 **Option 2: CLI flag**
 
@@ -135,9 +152,9 @@ dcx up --config-dir ~/.dcx --workspace-folder ~/testing-project --network host
 
 ## Documentation
 
-- **[Setup Guide](specs/setup.md)** — Installation & configuration
+- **[Setup Guide](specs/guides/setup.md)** — Installation & configuration
 - **[Architecture](specs/architecture.md)** — How it works, commands, usage
-- **[Troubleshooting](specs/failure-recovery.md)** — Error recovery
+- **[Troubleshooting](specs/guides/failure-recovery.md)** — Error recovery
 - **[Full Index](specs/README.md)** — All documentation
 
 ## Development Containers
@@ -158,7 +175,11 @@ dcx up --workspace-folder . --config-dir .devcontainer/slim
 dcx up --workspace-folder . --config-dir .devcontainer/full
 ```
 
-The `.devcontainer/full/` directory includes a `dcx_config.yaml` that mounts `~/.gitconfig` and `~/.claude.json` automatically.
+The `.devcontainer/full/` directory includes a `dcx_config.yaml` that stages:
+- `~/.gitconfig` — hardlinked into staging (standard mount, static config). Also auto-injected by dcx via colima.yaml mounts.
+- `~/.claude.json` — live-synced (`sync: true`, via inotify/FSEvents daemon)
+
+This means Claude Code in the container will see authentication updates from the host in real-time as you log in/out, without needing to restart the container. Note: `~/.gitconfig` appears in both the dcx_config.yaml and colima.yaml; dcx automatically deduplicates these at runtime. Git config remains hardlinked for efficiency since it rarely changes during container runtime.
 
 ## Building
 

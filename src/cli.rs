@@ -50,6 +50,10 @@ pub enum Commands {
         /// - open: unrestricted access
         #[arg(long, value_name = "MODE")]
         network: Option<NetworkMode>,
+
+        /// Build the container image without using Docker cache
+        #[arg(long)]
+        no_cache: bool,
     },
 
     /// Run a command inside the devcontainer
@@ -128,6 +132,22 @@ pub enum Commands {
         /// Target shell
         #[arg(value_enum)]
         shell: clap_complete::Shell,
+    },
+
+    /// Internal sync daemon (not for direct user invocation)
+    #[command(name = "_sync-daemon", hide = true)]
+    SyncDaemon {
+        /// Source (host) file paths (repeatable, paired with --staging)
+        #[arg(long = "source", required = true)]
+        sources: Vec<PathBuf>,
+
+        /// Staging file paths (repeatable, paired with --source)
+        #[arg(long = "staging", required = true)]
+        stagings: Vec<PathBuf>,
+
+        /// PID file path
+        #[arg(long = "pid-file", required = true)]
+        pid_file: PathBuf,
     },
 
     /// Forward to devcontainer CLI (any unrecognised subcommand)

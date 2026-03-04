@@ -95,6 +95,22 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
         }
     }
 
+    // 7b. Kill sync daemon if it's running.
+    // The daemon writes its PID to .sync-daemon.pid in the staging dir.
+    let staging = staging_dir(&mount_point);
+    let pid_file = staging.join(".sync-daemon.pid");
+    if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+        let pid = pid_str.trim();
+        if !pid.is_empty() {
+            let _ = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid)
+                .status();
+            // Brief wait for daemon to remove its own PID file
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+
     // 8. Unmount bindfs. If SIGINT arrived between steps 7 and 8 (or during unmount),
     // log the message and complete the unmount before exiting.
     let was_interrupted = interrupted.load(Ordering::Relaxed);
@@ -125,7 +141,6 @@ pub fn run_down(home: &Path, workspace_folder: Option<PathBuf>) -> i32 {
     }
 
     // 9b. Remove staging directory for this workspace (non-fatal).
-    let staging = staging_dir(&mount_point);
     if staging.exists()
         && let Err(e) = std::fs::remove_dir_all(&staging)
     {

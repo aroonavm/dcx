@@ -68,7 +68,10 @@ tests/
   │   ├── test_dcx_status.sh
   │   ├── test_dcx_doctor.sh
   │   ├── test_edge_cases.sh
-  │   └── test_stale_mounts.sh
+  │   ├── test_dcx_file_staging.sh
+  │   ├── test_network_mode_switch.sh
+  │   ├── test_sync_atomic_writes.sh
+  │   └── test_passthrough.sh   # Docker-only pass-through tests
   └── ... (Rust integration tests at tests/*.rs)
 ```
 

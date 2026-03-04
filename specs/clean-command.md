@@ -12,8 +12,8 @@ See [architecture.md § dcx clean](architecture.md#cmd-clean) for complete behav
 struct CleanPlan {
     mount_point: PathBuf,
     mount_name: String,
-    state: String,                      // "running", "orphaned", "stale", "empty"
-    container_id: Option<String>,
+    state: String,                      // "running", "orphaned", "stale", "empty dir"
+    container_ids: Vec<String>,         // May contain 0 or more containers
     runtime_image_id: Option<String>,
     has_base_image_tag: bool,           // dcx-base:<mount_name> exists (purge only)
     volumes: Vec<String>,               // only when purge=true
@@ -54,14 +54,14 @@ dry_run: bool,    // new
 
 ### Refactor src/clean.rs
 - Add `CleanPlan` struct
-- Add `scan_one()` function
-- Add `execute_one()` function
-- Update `run_clean()` signature: `(purge: bool, dry_run: bool)` instead of `include_base_image`
+- Add `scan_one()` function: `(mount_point: &Path, purge: bool) → CleanPlan`
+- Add `execute_one()` function: `(plan: &CleanPlan) → Result<(), String>`
+- Update `run_clean()` signature: `(home: &Path, workspace_folder: Option<PathBuf>, all: bool, yes: bool, purge: bool, dry_run: bool) → i32`
 - Add dry-run logic: if `--dry-run`, scan → format → print → exit 0
 
 ### Dry-run Formatting
-**src/format.rs** — Add:
-- `format_dry_run(plans: &[CleanPlan]) → String` — Preview showing what would be cleaned
+**src/format.rs** — `format_dry_run` function (implemented):
+- `format_dry_run(plans: &[DryRunPlan]) → String` — Preview showing what would be cleaned
 
 Example output:
 ```

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::path::Path;
+use std::process::Command;
 
 use crate::categorize::{MountStatus, categorize};
 use crate::docker;
@@ -10,6 +11,40 @@ use crate::mount_table;
 use crate::naming::{relay_dir, scan_relay};
 use crate::platform;
 use crate::progress;
+use crate::up::staging_dir;
+
+/// Check if sync daemon is running for a given mount point.
+///
+/// Returns `"running"` if the daemon PID file exists and the process is alive.
+/// Returns `"stopped"` if the PID file doesn't exist or the process is dead.
+/// Returns `"–"` if not applicable (mount not active).
+fn daemon_status(mount_point: &Path, is_mounted: bool) -> String {
+    if !is_mounted {
+        return "–".to_string();
+    }
+
+    let staging = staging_dir(mount_point);
+    let pid_file = staging.join(".sync-daemon.pid");
+
+    // Try to read the PID file
+    let pid_str = match std::fs::read_to_string(&pid_file) {
+        Ok(content) => content,
+        Err(_) => return "stopped".to_string(),
+    };
+
+    let pid = pid_str.trim();
+    if pid.is_empty() {
+        return "stopped".to_string();
+    }
+
+    // Check if the process is alive by sending signal 0 (doesn't kill, just checks)
+    let output = Command::new("kill").arg("-0").arg(pid).output();
+
+    match output {
+        Ok(status) if status.status.success() => "running".to_string(),
+        _ => "stopped".to_string(),
+    }
+}
 
 /// Human-readable state label for a dcx mount entry.
 ///
@@ -67,12 +102,15 @@ pub fn run_status(home: &Path) -> i32 {
             let network = container
                 .as_ref()
                 .and_then(|c| docker::read_network_mode(c));
+            // Check sync daemon status
+            let daemon = daemon_status(mount_point, is_mounted && is_accessible);
             StatusRow {
                 workspace,
                 mount,
                 container,
                 network,
                 state: state.to_string(),
+                daemon,
             }
         })
         .collect();
@@ -107,5 +145,67 @@ mod tests {
     fn label_stale_ignores_container_flag() {
         // When not mounted, the has_container flag is irrelevant — always "stale mount".
         assert_eq!(mount_state_label(false, true), "stale mount");
+    }
+
+    // --- daemon_status ---
+
+    #[test]
+    fn daemon_status_not_mounted_returns_dash() {
+        let mount = std::path::Path::new("/some/path");
+        let status = daemon_status(mount, false);
+        assert_eq!(status, "–");
+    }
+
+    #[test]
+    fn daemon_status_missing_pid_file_returns_stopped() {
+        // Create a staging dir without a .sync-daemon.pid file
+        let staging_dir = tempfile::TempDir::new().unwrap();
+        let status = daemon_status(staging_dir.path(), true);
+        assert_eq!(status, "stopped");
+    }
+
+    #[test]
+    fn daemon_status_empty_pid_file_returns_stopped() {
+        // Create a staging dir with an empty or whitespace-only PID file
+        let staging_dir = tempfile::TempDir::new().unwrap();
+        let pid_file = staging_dir.path().join(".sync-daemon.pid");
+        std::fs::write(&pid_file, b"   \n").unwrap();
+        let status = daemon_status(staging_dir.path(), true);
+        assert_eq!(status, "stopped");
+    }
+
+    #[test]
+    fn daemon_status_invalid_pid_file_returns_stopped() {
+        // PID file exists but contains non-numeric garbage
+        let staging_dir = tempfile::TempDir::new().unwrap();
+        let pid_file = staging_dir.path().join(".sync-daemon.pid");
+        std::fs::write(&pid_file, b"not-a-pid").unwrap();
+        let status = daemon_status(staging_dir.path(), true);
+        // Since `kill -0 not-a-pid` will fail (not a valid PID),
+        // the status should be "stopped"
+        assert_eq!(status, "stopped");
+    }
+
+    #[test]
+    fn daemon_status_nonexistent_pid_returns_stopped() {
+        // PID file contains a PID that doesn't exist
+        let staging_dir = tempfile::TempDir::new().unwrap();
+        let pid_file = staging_dir.path().join(".sync-daemon.pid");
+        // Use a very high PID that's unlikely to exist
+        std::fs::write(&pid_file, b"999999999").unwrap();
+        let status = daemon_status(staging_dir.path(), true);
+        assert_eq!(status, "stopped");
+    }
+
+    #[test]
+    fn daemon_status_with_trimmed_whitespace_returns_stopped() {
+        // Test that PID is correctly trimmed from file before being used
+        let staging_dir = tempfile::TempDir::new().unwrap();
+        let pid_file = staging_dir.path().join(".sync-daemon.pid");
+        // Write PID with surrounding whitespace (like from file read)
+        std::fs::write(&pid_file, b"  999999999  \n").unwrap();
+        let status = daemon_status(staging_dir.path(), true);
+        // PID 999999999 doesn't exist, so it should be "stopped"
+        assert_eq!(status, "stopped");
     }
 }

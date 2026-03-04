@@ -56,19 +56,51 @@ fn json_escape(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
+/// Parse the remoteUser field from a devcontainer.json JSON string.
+/// Returns None if the field is not found or malformed.
+fn parse_remote_user(json: &str) -> Option<String> {
+    // Strip JSONC comments for safer parsing
+    let clean = docker::strip_jsonc_comments(json);
+
+    // Find "remoteUser"
+    let pos = clean.find("\"remoteUser\"")?;
+    let rest = clean[pos + "\"remoteUser\"".len()..].trim_start();
+
+    // Expect a colon
+    let rest = rest.strip_prefix(':')?.trim_start();
+
+    // Expect an opening quote
+    let rest = rest.strip_prefix('"')?;
+
+    // Find the closing quote
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Get the home directory path for a container user.
+fn container_home(remote_user: &str) -> PathBuf {
+    if remote_user == "root" {
+        PathBuf::from("/root")
+    } else {
+        PathBuf::from(format!("/home/{remote_user}"))
+    }
+}
+
 /// Build a mount entry string for inclusion in the mounts array.
-/// Example: `source=/home/user/.claude,target=/home/user/.claude,type=bind`
-fn build_mount_entry(host_path: &Path, writable: bool) -> String {
-    let path_str = json_escape(&host_path.to_string_lossy());
+/// Example: `source=/home/user/.claude,target=/home/rust/.claude,type=bind`
+fn build_mount_entry(source: &Path, target: &Path, writable: bool) -> String {
+    let source_str = json_escape(&source.to_string_lossy());
+    let target_str = json_escape(&target.to_string_lossy());
     let readonly = if writable { "" } else { ",readonly" };
     format!(
         "source={},target={},type=bind{}",
-        path_str, path_str, readonly
+        source_str, target_str, readonly
     )
 }
 
-/// Build environment variable overrides for well-known apps (git, claude).
+/// Build environment variable overrides for well-known apps (git).
 /// Returns a vec of (key, value) pairs to inject into containerEnv.
+/// Note: ~/.claude is now mounted at the container user's home, so CLAUDE_CONFIG_DIR is not needed.
 fn build_env_overrides(
     mounts: &[crate::colima::ColimaMount],
     home: &Path,
@@ -79,12 +111,6 @@ fn build_env_overrides(
         if mount.location == "~/.gitconfig" {
             vars.push((
                 "GIT_CONFIG_GLOBAL".to_string(),
-                expanded.to_string_lossy().into_owned(),
-            ));
-        }
-        if mount.location == "~/.claude" {
-            vars.push((
-                "CLAUDE_CONFIG_DIR".to_string(),
                 expanded.to_string_lossy().into_owned(),
             ));
         }
@@ -417,6 +443,7 @@ pub fn dry_run_plan(
     mount_point: &Path,
     home: &Path,
     config: Option<&Path>,
+    no_cache: bool,
 ) -> String {
     let tilde_mount = tilde_path(mount_point, home);
     let mut args = vec![
@@ -427,6 +454,9 @@ pub fn dry_run_plan(
     if let Some(cfg) = config {
         args.push("--config".to_string());
         args.push(cfg.to_string_lossy().into_owned());
+    }
+    if no_cache {
+        args.push("--build-no-cache".to_string());
     }
     let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let devcontainer_cmd = cmd::display_cmd("devcontainer", &args_ref);
@@ -571,8 +601,20 @@ fn rollback(mount_point: &Path) {
     if let Err(e) = std::fs::remove_dir(mount_point) {
         eprintln!("Warning: rollback rmdir failed: {e}");
     }
-    // Clean up the staging dir that may have been populated before devcontainer up failed.
+    // Kill sync daemon before removing staging dir (prevents orphaned daemon).
     let staging = staging_dir(mount_point);
+    let pid_file = staging.join(".sync-daemon.pid");
+    if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+        let pid = pid_str.trim();
+        if !pid.is_empty() {
+            let _ = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid)
+                .status();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+    // Clean up the staging dir that may have been populated before devcontainer up failed.
     if staging.exists()
         && let Err(e) = std::fs::remove_dir_all(&staging)
     {
@@ -586,15 +628,28 @@ fn rollback(mount_point: &Path) {
 /// Run `dcx up`.
 ///
 /// Returns the exit code that `main` should pass to `std::process::exit`.
-pub fn run_up(
-    home: &Path,
-    workspace_folder: Option<PathBuf>,
-    config_dir: Option<PathBuf>,
-    extra_files: &[PathBuf],
-    dry_run: bool,
-    yes: bool,
-    cli_network: Option<NetworkMode>,
-) -> i32 {
+/// Options for `dcx up`.
+pub struct UpOptions {
+    pub workspace_folder: Option<PathBuf>,
+    pub config_dir: Option<PathBuf>,
+    pub extra_files: Vec<PathBuf>,
+    pub dry_run: bool,
+    pub yes: bool,
+    pub cli_network: Option<NetworkMode>,
+    pub no_cache: bool,
+}
+
+pub fn run_up(home: &Path, opts: UpOptions) -> i32 {
+    let UpOptions {
+        workspace_folder,
+        config_dir,
+        extra_files,
+        dry_run,
+        yes,
+        cli_network,
+        no_cache,
+    } = opts;
+
     // Install SIGINT handler before any mount operations so Ctrl+C triggers rollback
     // rather than leaving an orphaned mount.
     let interrupted = signals::interrupted_flag();
@@ -647,13 +702,25 @@ pub fn run_up(
         };
 
     // 2c. Merge network and yes settings from dcx_config.yaml.
-    // Config discovery: check --config-dir, then alongside devcontainer.json, then workspace fallback.
+    // Config discovery: 4-step order per spec:
+    // 1. --config-dir (explicit, already resolved above to dcx_config_dir)
+    // 2. $DCX_DEVCONTAINER_CONFIG_DIR_PATH (merged with --config-dir at call site in main.rs)
+    // 3. Alongside the auto-detected devcontainer.json (if no explicit config dir)
+    // 4. Workspace root fallback (dcx_config::find_dcx_config)
     let cfg_path = if let Some(ref dir) = dcx_config_dir {
+        // Steps 1 & 2: explicit config dir (--config-dir or env var)
         Some(dir.join("dcx_config.yaml"))
-    } else if let Some(ref json) = devcontainer_config {
-        json.parent().map(|p| p.join("dcx_config.yaml"))
     } else {
-        dcx_config::find_dcx_config(&workspace)
+        // No explicit config dir: try step 3 (alongside auto-detected devcontainer.json)
+        // then step 4 (workspace fallback)
+        let auto_detected_json = find_devcontainer_config(&workspace);
+        if let Some(json_path) = auto_detected_json {
+            // Step 3: check alongside the auto-detected devcontainer.json
+            json_path.parent().map(|p| p.join("dcx_config.yaml"))
+        } else {
+            // Step 4: workspace root fallback
+            dcx_config::find_dcx_config(&workspace)
+        }
     };
     let cfg = cfg_path
         .map(|p| dcx_config::read_dcx_config(&p))
@@ -727,7 +794,8 @@ pub fn run_up(
                 &workspace,
                 &mount_point,
                 home,
-                devcontainer_config.as_deref()
+                devcontainer_config.as_deref(),
+                no_cache,
             )
         );
         return exit_codes::SUCCESS;
@@ -739,17 +807,6 @@ pub fn run_up(
     {
         eprintln!("Failed to create {}: {e}", relay.display());
         return exit_codes::RUNTIME_ERROR;
-    }
-
-    // 8. Non-owned directory warning — prompt unless --yes (or up.yes from config).
-    if !final_yes {
-        #[cfg(unix)]
-        if let (Some(fuid), Some(cuid)) = (file_uid(&workspace), current_uid())
-            && fuid != cuid
-            && !confirm_non_owned(&workspace, fuid, cuid)
-        {
-            return exit_codes::USER_ABORTED;
-        }
     }
 
     // 9. Mount handling: new / idempotent reuse / stale recovery / collision.
@@ -829,7 +886,22 @@ pub fn run_up(
         }
     }
 
-    // 10. Delegate to `devcontainer up` with rewritten workspace path.
+    // 12. Non-owned directory warning — prompt unless --yes (or up.yes from config).
+    // (After mount exists, per spec step 12.)
+    if !final_yes {
+        #[cfg(unix)]
+        if let (Some(fuid), Some(cuid)) = (file_uid(&workspace), current_uid())
+            && fuid != cuid
+            && !confirm_non_owned(&workspace, fuid, cuid)
+        {
+            if mounted_fresh {
+                rollback(&mount_point);
+            }
+            return exit_codes::USER_ABORTED;
+        }
+    }
+
+    // 13. Delegate to `devcontainer up` with rewritten workspace path.
     // Check the interrupted flag before starting devcontainer: if SIGINT arrived
     // in the window between do_mount returning and here, roll back and exit cleanly.
     if interrupted.load(Ordering::Relaxed) {
@@ -859,11 +931,13 @@ pub fn run_up(
         .unwrap_or("");
 
     // Read colima.yaml and discover mounts to inject, deduplicating against base config.
-    let (extra_mounts, extra_env) = {
+    // Also process explicit files and collect sync pairs for daemon spawning.
+    let (extra_mounts, extra_env, sync_pairs) = {
         let colima_path = colima::colima_config_path(home);
         let staging = staging_dir(&mount_point);
         let mut mounts_to_inject = Vec::new();
         let mut env_to_inject = Vec::new();
+        let mut sync_pairs: Vec<crate::sync::SyncPair> = Vec::new();
 
         if let Ok(yaml_content) = std::fs::read_to_string(&colima_path) {
             let colima_mounts = colima::parse_colima_mounts(&yaml_content);
@@ -894,7 +968,20 @@ pub fn run_up(
                             }
                         }
                     } else {
-                        mounts_to_inject.push(build_mount_entry(&expanded, mount.writable));
+                        // For .claude directories, mount at container user's home instead of host path
+                        let target =
+                            if expanded.file_name() == Some(std::ffi::OsStr::new(".claude")) {
+                                parse_remote_user(base_json)
+                                    .map(|u| container_home(&u).join(".claude"))
+                                    .unwrap_or_else(|| expanded.clone())
+                            } else {
+                                expanded.clone()
+                            };
+                        mounts_to_inject.push(build_mount_entry(
+                            &expanded,
+                            &target,
+                            mount.writable,
+                        ));
                     }
                 }
             }
@@ -908,16 +995,123 @@ pub fn run_up(
             }
         }
 
-        // Collect files from dcx_config.yaml and --file CLI flag.
-        let explicit_files: Vec<PathBuf> = {
-            let mut v: Vec<PathBuf> = extra_files.to_vec();
-            for loc in &up_cfg.files {
-                v.push(colima::expand_tilde(loc, home));
-            }
-            v
-        };
+        // Process files from dcx_config.yaml and --file CLI flag.
+        // For sync: true files, use fs::copy; for sync: false, use hardlink (with fallback to copy).
+        // Record SyncPair entries in the sync_pairs vec for later daemon spawning.
 
-        for file_path in &explicit_files {
+        // Process files from dcx_config.yaml
+        for file_mount in &up_cfg.files {
+            let file_path = colima::expand_tilde(&file_mount.path, home);
+
+            if !file_path.exists() {
+                eprintln!(
+                    "Warning: --file {} does not exist, skipping.",
+                    file_path.display()
+                );
+                continue;
+            }
+            if !file_path.is_file() {
+                eprintln!(
+                    "Warning: --file {} is not a file, skipping.",
+                    file_path.display()
+                );
+                continue;
+            }
+            if mount_target_in_base(&file_path, base_json, home) {
+                continue;
+            }
+
+            // Stage the file: fs::copy for sync: true, hardlink for sync: false
+            std::fs::create_dir_all(&staging)
+                .map_err(|e| format!("Failed to create staging dir {}: {e}", staging.display()))
+                .ok();
+
+            let file_name = match file_path.file_name() {
+                Some(name) => name.to_string_lossy().to_string(),
+                None => {
+                    eprintln!(
+                        "Warning: Could not extract filename from {}",
+                        file_path.display()
+                    );
+                    continue;
+                }
+            };
+
+            let staged = staging.join(&file_name);
+            if let Err(e) = std::fs::remove_file(&staged)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!(
+                    "Warning: Could not remove existing {}: {e}",
+                    staged.display()
+                );
+            }
+
+            // Choose staging strategy based on sync flag
+            let stage_result = if file_mount.sync {
+                // fs::copy for synced files (overwrites in-place, stable inode)
+                match std::fs::copy(&file_path, &staged) {
+                    Ok(_) => Ok((staged.clone(), true)),
+                    Err(e) => Err(format!("Failed to copy {}: {e}", file_path.display())),
+                }
+            } else {
+                // Hardlink with copy fallback for non-synced files
+                match std::fs::hard_link(&file_path, &staged) {
+                    Ok(()) => Ok((staged.clone(), true)),
+                    Err(e) if e.raw_os_error() == Some(18) => {
+                        eprintln!(
+                            "Warning: {} is on a different filesystem; staging as readonly copy.",
+                            file_path.display()
+                        );
+                        match std::fs::copy(&file_path, &staged) {
+                            Ok(_) => Ok((staged.clone(), false)),
+                            Err(e) => Err(format!("Failed to copy {}: {e}", file_path.display())),
+                        }
+                    }
+                    Err(e) => Err(format!("{e}")),
+                }
+            };
+
+            match stage_result {
+                Ok((staged_path, writable)) => {
+                    // Record sync pair for daemon spawning
+                    if file_mount.sync {
+                        sync_pairs.push(crate::sync::SyncPair {
+                            source: file_path.clone(),
+                            staging: staged_path.clone(),
+                        });
+                    }
+
+                    // Determine mount target: for sync: true, use container user's home
+                    let mount_target = if file_mount.sync {
+                        match parse_remote_user(base_json) {
+                            Some(user) => {
+                                let container_home_path = container_home(&user);
+                                container_home_path.join(&file_name)
+                            }
+                            None => file_path.clone(), // fallback to source path
+                        }
+                    } else {
+                        file_path.clone()
+                    };
+
+                    let opts = if writable {
+                        "type=bind"
+                    } else {
+                        "type=bind,readonly"
+                    };
+                    mounts_to_inject.push(format!(
+                        "source={},target={},{opts}",
+                        json_escape(&staged_path.to_string_lossy()),
+                        json_escape(&mount_target.to_string_lossy()),
+                    ));
+                }
+                Err(e) => eprintln!("Warning: Could not stage {}: {e}", file_path.display()),
+            }
+        }
+
+        // Process --file CLI flags (these are always sync: false)
+        for file_path in &extra_files {
             if !file_path.exists() {
                 eprintln!(
                     "Warning: --file {} does not exist, skipping.",
@@ -952,7 +1146,7 @@ pub fn run_up(
             }
         }
 
-        (mounts_to_inject, env_to_inject)
+        (mounts_to_inject, env_to_inject, sync_pairs)
     };
 
     // Create override-config JSON to remap workspaceFolder and workspaceMount
@@ -1011,11 +1205,61 @@ pub fn run_up(
         dc_args.push("--config");
         dc_args.push(s.as_str());
     }
+    if no_cache {
+        dc_args.push("--build-no-cache");
+    }
+
+    // Spawn sync daemon if there are synced files to keep in sync
+    if !sync_pairs.is_empty() {
+        use std::os::unix::process::CommandExt;
+
+        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("dcx"));
+        let pid_file = staging_dir(&mount_point).join(".sync-daemon.pid");
+
+        // Skip if a daemon is already running for this workspace
+        let daemon_running = std::fs::read_to_string(&pid_file)
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .map(|pid| {
+                std::process::Command::new("kill")
+                    .arg("-0")
+                    .arg(pid.to_string())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+
+        if !daemon_running {
+            let mut daemon_cmd = std::process::Command::new(&exe);
+            daemon_cmd
+                .arg("_sync-daemon")
+                .arg("--pid-file")
+                .arg(&pid_file);
+            for pair in &sync_pairs {
+                daemon_cmd
+                    .arg("--source")
+                    .arg(&pair.source)
+                    .arg("--staging")
+                    .arg(&pair.staging);
+            }
+            daemon_cmd
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .stdin(std::process::Stdio::null())
+                .process_group(0); // Detach from parent process group so daemon survives when parent exits
+            match daemon_cmd.spawn() {
+                Ok(child) => drop(child), // orphan: adopted by init when dcx up exits
+                Err(e) => eprintln!("Warning: Could not start sync daemon: {e}"),
+            }
+        }
+    }
+
     let code = cmd::run_stream("devcontainer", &dc_args).unwrap_or(exit_codes::PREREQ_NOT_FOUND);
     // Drop override_config to clean up temp file before continuing
     drop(override_config);
 
-    // 11. Roll back on failure (if we mounted this run) and return RUNTIME_ERROR.
+    // 14. Roll back on failure (if we mounted this run) and return RUNTIME_ERROR.
     // This handles both normal devcontainer failures and Ctrl+C (SIGINT kills the child,
     // returning non-zero, which lands here for rollback).
     // The spec requires exit code 1 (not the child's exit code) when dcx up fails
@@ -1088,7 +1332,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home, None);
+        let out = dry_run_plan(ws, mp, home, None, false);
         assert!(out.contains("Would mount:"), "got: {out}");
         assert!(out.contains("/home/user/myproject"), "got: {out}");
         assert!(out.contains("dcx-myproject-a1b2c3d4"), "got: {out}");
@@ -1099,7 +1343,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home, None);
+        let out = dry_run_plan(ws, mp, home, None, false);
         assert!(
             out.contains("~/.colima-mounts/dcx-myproject-a1b2c3d4"),
             "mount path must use tilde abbreviation, got: {out}"
@@ -1115,7 +1359,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home, None);
+        let out = dry_run_plan(ws, mp, home, None, false);
         assert!(out.contains("Would run:"), "got: {out}");
         assert!(
             out.contains("devcontainer up --workspace-folder"),
@@ -1129,7 +1373,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home, None);
+        let out = dry_run_plan(ws, mp, home, None, false);
         let arrow_pos = out
             .find('\u{2192}')
             .expect("→ arrow not found in dry-run output");
@@ -1145,7 +1389,7 @@ mod tests {
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
         let cfg = Path::new("/home/user/myproject/.devcontainer/full/devcontainer.json");
-        let out = dry_run_plan(ws, mp, home, Some(cfg));
+        let out = dry_run_plan(ws, mp, home, Some(cfg), false);
         assert!(out.contains("--config"), "got: {out}");
         assert!(
             out.contains("/home/user/myproject/.devcontainer/full/devcontainer.json"),
@@ -1158,7 +1402,7 @@ mod tests {
         let home = Path::new("/home/user");
         let ws = Path::new("/home/user/myproject");
         let mp = Path::new("/home/user/.colima-mounts/dcx-myproject-a1b2c3d4");
-        let out = dry_run_plan(ws, mp, home, None);
+        let out = dry_run_plan(ws, mp, home, None, false);
         assert!(!out.contains("--config"), "got: {out}");
     }
 
@@ -1219,8 +1463,9 @@ mod tests {
 
     #[test]
     fn build_mount_entry_writable() {
-        let path = Path::new("/home/user/.claude");
-        let entry = build_mount_entry(path, true);
+        let source = Path::new("/home/user/.claude");
+        let target = Path::new("/home/user/.claude");
+        let entry = build_mount_entry(source, target, true);
         assert!(entry.contains("source=/home/user/.claude"));
         assert!(entry.contains("target=/home/user/.claude"));
         assert!(entry.contains("type=bind"));
@@ -1229,8 +1474,9 @@ mod tests {
 
     #[test]
     fn build_mount_entry_readonly() {
-        let path = Path::new("/home/user/.gitconfig");
-        let entry = build_mount_entry(path, false);
+        let source = Path::new("/home/user/.gitconfig");
+        let target = Path::new("/home/user/.gitconfig");
+        let entry = build_mount_entry(source, target, false);
         assert!(entry.contains("source=/home/user/.gitconfig"));
         assert!(entry.contains("target=/home/user/.gitconfig"));
         assert!(entry.contains("type=bind"));
@@ -1239,8 +1485,9 @@ mod tests {
 
     #[test]
     fn build_mount_entry_escapes_special_chars() {
-        let path = Path::new("/home/user/path\"with\\quotes");
-        let entry = build_mount_entry(path, true);
+        let source = Path::new("/home/user/path\"with\\quotes");
+        let target = Path::new("/home/user/path\"with\\quotes");
+        let entry = build_mount_entry(source, target, true);
         assert!(entry.contains("\\\""));
         assert!(entry.contains("\\\\"));
     }
@@ -1262,7 +1509,8 @@ mod tests {
     }
 
     #[test]
-    fn build_env_overrides_includes_claude_config() {
+    fn build_env_overrides_ignores_claude_mount() {
+        // .claude is now mounted at container user's home, so CLAUDE_CONFIG_DIR is not needed
         let mounts = vec![crate::colima::ColimaMount {
             location: "~/.claude".to_string(),
             writable: true,
@@ -1271,8 +1519,10 @@ mod tests {
         let vars = build_env_overrides(&mounts, home);
 
         let claude_var = vars.iter().find(|(k, _)| k == "CLAUDE_CONFIG_DIR");
-        assert!(claude_var.is_some());
-        assert_eq!(claude_var.unwrap().1, "/home/user/.claude");
+        assert!(
+            claude_var.is_none(),
+            "CLAUDE_CONFIG_DIR should not be injected"
+        );
     }
 
     #[test]
@@ -1823,7 +2073,7 @@ mod tests {
     fn inject_env_vars_drops_vars_when_container_env_brace_unclosed() {
         // `"containerEnv"` found and its `{` found, but closing `}` is missing.
         // find_closing_brace returns None → vars are NOT injected (silently dropped).
-        let json = r#"{"containerEnv": {"KEY": "val"}"#; // outer `}` missing
+        let _json = r#"{"containerEnv": {"KEY": "val"}"#; // outer `}` missing
         // The inner `}` closes containerEnv. The outer object has no `}`.
         // Actually: containerEnv `{` is at position after `: `. The inner `}` closes it.
         // Then outer `}` is missing.
@@ -1892,5 +2142,55 @@ mod tests {
             json.contains("\\\""),
             "path with quote must be JSON-escaped: {json}"
         );
+    }
+
+    // --- parse_remote_user / container_home ---
+
+    #[test]
+    fn parse_remote_user_from_devcontainer_json() {
+        // Typical devcontainer.json with remoteUser field
+        let json = r#"{ "image": "ubuntu", "remoteUser": "rust" }"#;
+        let user = parse_remote_user(json);
+        assert_eq!(user, Some("rust".to_string()));
+    }
+
+    #[test]
+    fn parse_remote_user_with_comments() {
+        // JSON with JSONC-style comments
+        let json = r#"{
+            // This is the image
+            "image": "ubuntu",
+            // Remote user for development
+            "remoteUser": "rust"
+        }"#;
+        let user = parse_remote_user(json);
+        assert_eq!(user, Some("rust".to_string()));
+    }
+
+    #[test]
+    fn parse_remote_user_missing() {
+        // JSON without remoteUser field
+        let json = r#"{ "image": "ubuntu" }"#;
+        let user = parse_remote_user(json);
+        assert_eq!(user, None);
+    }
+
+    #[test]
+    fn parse_remote_user_with_spaces_around_colon() {
+        let json = r#"{ "remoteUser" : "myuser" }"#;
+        let user = parse_remote_user(json);
+        assert_eq!(user, Some("myuser".to_string()));
+    }
+
+    #[test]
+    fn container_home_for_regular_user() {
+        let home = container_home("rust");
+        assert_eq!(home, PathBuf::from("/home/rust"));
+    }
+
+    #[test]
+    fn container_home_for_root() {
+        let home = container_home("root");
+        assert_eq!(home, PathBuf::from("/root"));
     }
 }

@@ -61,7 +61,7 @@ Host /home/user/myproject ──[bindfs]──> Host ~/.colima-mounts/dcx-myproj
 
 **Usage:**
 ```bash
-dcx up [--workspace-folder PATH] [--config-dir DIR] [--file PATH]... [--network MODE] [--dry-run] [--yes]
+dcx up [--workspace-folder PATH] [--config-dir DIR] [--file PATH]... [--network MODE] [--no-cache] [--dry-run] [--yes]
 ```
 
 **Flags:**
@@ -69,6 +69,7 @@ dcx up [--workspace-folder PATH] [--config-dir DIR] [--file PATH]... [--network 
 - `--config-dir DIR` — directory containing `devcontainer.json` (and optionally `dcx_config.yaml`); skips auto-detection; resolves `devcontainer.json` from within and forwards it to `devcontainer up`. Overridden by `DCX_DEVCONTAINER_CONFIG_DIR_PATH` if both are set (flag wins).
 - `--file PATH` — host file path to stage into the container (may be repeated); see file staging below
 - `--network MODE` — network isolation level (default: `minimal`)
+- `--no-cache` — build the container image without using Docker cache (passed as `--build-no-cache` to `devcontainer up`)
   - `restricted` — no network access; block all external traffic
   - `minimal` — dev tools only (GitHub, npm, Anthropic APIs, VSCode, Sentry) [default]
   - `host` — allow host network only
@@ -88,24 +89,42 @@ dcx up [--workspace-folder PATH] [--config-dir DIR] [--file PATH]... [--network 
 11. If mount missing: create + mount with `bindfs --no-allow-other`
 12. If workspace not owned by user: warn + prompt (skip with `--yes`)
 13. Discover mounts from `colima.yaml`: read colima config, extract mounts, filter out `~/.colima-mounts`, expand tilde paths, and check which host paths exist. For directory mounts, build bind mount entries (source == target == original host path). For file mounts, stage via hardlink into `~/.colima-mounts/.dcx-<name>-files/` (see file staging below). Build environment variable overrides for well-known apps (git, claude). Merge config settings (network, yes, files) from `dcx_config.yaml` using discovery order (see [dcx_config.md](dcx_config.md)). Also process files from CLI `--file` flags via the same file staging mechanism. Create override-config JSON mapping `workspaceMount` and `workspaceFolder` to the original workspace path, plus the discovered mounts and env vars. Pass `--workspace-folder` → mount point (relay path) and `--override-config` → override JSON. Forward `--config` (resolved `devcontainer.json`) if provided.
-13.5. Network mode enforcement: check if any existing containers have a mismatched `dcx.network-mode` label. If found, stop and remove them so `devcontainer up` creates a fresh container with the requested mode. Handles containers that survived `dcx down` for any reason (e.g., FUSE mount disappeared but container remained).
-14. Delegate to `devcontainer up` (devcontainer stamps container with label `dcx.network-mode=<mode>`)
-15. On failure: rollback (unmount + remove dir), exit 1
-16. On SIGINT: rollback before exit
+14. Network mode enforcement: check if any existing containers have a mismatched `dcx.network-mode` label. If found, stop and remove them so `devcontainer up` creates a fresh container with the requested mode. Handles containers that survived `dcx down` for any reason (e.g., FUSE mount disappeared but container remained).
+15. Delegate to `devcontainer up` (devcontainer stamps container with label `dcx.network-mode=<mode>`)
+16. On failure: rollback (unmount + remove dir), exit 1
+17. On SIGINT: rollback before exit
 
 **File staging:**
 
 Colima cannot mount individual files into the VM — only directories. To make individual host files (e.g., `~/.gitconfig`, `~/.claude.json`) accessible inside containers, dcx stages them:
 
 1. Compute staging directory: `~/.colima-mounts/.dcx-<name>-files/` (dot-prefixed to avoid scan_relay pickup)
-2. Hardlink the file into the staging directory (same inode → writes inside container propagate to host)
-3. If hardlink fails (EXDEV, cross-filesystem): fall back to `std::fs::copy` with a readonly mount and a warning
-4. Inject the staged path as a bind mount (source=staged, target=original host path)
+2. **For standard files** (`sync: false`, default):
+   - Hardlink the file into the staging directory (same inode → writes inside container propagate to host)
+   - If hardlink fails (EXDEV, cross-filesystem): fall back to `std::fs::copy` with a readonly mount and a warning
+   - Inject the staged path as a bind mount (source=staged, target=original host path)
 
-Files can be declared in three ways:
-- Colima mounts (`colima.yaml`): if a mount entry resolves to a file (not directory), it is staged
-- Per-project config: `dcx_config.yaml` alongside `devcontainer.json` with `up.files:` list (see [dcx_config.md](dcx_config.md) for full schema)
-- Ad-hoc: `dcx up --file PATH`
+3. **For synced files** (`sync: true`):
+   - Copy the file into the staging directory via `fs::copy` (overwrites content in-place, stable inode)
+   - Mount at `/home/<remoteUser>/<filename>` (read from `devcontainer.json` `remoteUser` field)
+   - Spawn background sync daemon (orphan process) before `devcontainer up`
+   - Daemon watches **parent directories** of source and staging files using inotify (Linux) / FSEvents (macOS), filtering events by filename — handles atomic writes (temp+rename) correctly
+   - Uses SHA256-based debouncing to detect actual content changes (avoids spurious syncs)
+   - Writes use atomic temp+rename (never truncates destination mid-write)
+   - Staging→source sync is guarded: empty staging file cannot overwrite non-empty source (prevents data loss from container writing stripped configs)
+   - Falls back to 1-second polling if file watcher unavailable
+   - On `dcx down`: kill daemon via SIGTERM; cleanup staging directory
+   - On rollback (failed `dcx up`): kill daemon via SIGTERM before removing staging directory (prevents orphaned daemons)
+
+**Files can be declared three ways:**
+- Colima mounts (`colima.yaml`): if a mount entry resolves to a file, it is staged (standard mode)
+- Per-project config: `dcx_config.yaml` alongside `devcontainer.json` with `up.files:` list (standard or synced, see [dcx_config.md](dcx_config.md))
+- Ad-hoc: `dcx up --file PATH` (always standard mode)
+
+**When to use standard vs synced:**
+
+- **Standard** (`sync: false`): Static config files (git, ssh), rarely updated after container starts
+- **Synced** (`sync: true`): Auth files updated atomically by host apps (Claude Code auth, Docker credentials), need real-time propagation
 
 **Examples:**
 
@@ -115,15 +134,17 @@ up:
   network: minimal
   files:
     - path: ~/.gitconfig
+    - path: ~/.ssh/config
     - path: ~/.claude.json
+      sync: true            # Live-sync auth file (inotify/FSEvents with 1s fallback)
 ```
 
-CLI flag (ad-hoc, singular `--file`, repeatable):
+CLI flag (ad-hoc, singular `--file`, repeatable; always standard):
 ```bash
-dcx up --file ~/.gitconfig --file ~/.claude.json
+dcx up --file ~/.gitconfig --file ~/.ssh/config
 ```
 
-Both achieve the same result: files are hardlinked into the container's original host paths. See [dcx_config.md](dcx_config.md) for configuration reference, merge behavior, and discovery rules.
+See [dcx_config.md](dcx_config.md) for full configuration reference, merge behavior, and discovery rules.
 
 ---
 
@@ -161,13 +182,15 @@ dcx down [--workspace-folder PATH]
 
 **Behavior:**
 1. Validate Docker; fail exit 1
-2. Resolve workspace; fail exit 2 if missing or is a managed path
-3. Compute mount point
-4. If no mount AND no container: print "nothing to do", exit 0 (idempotent). Handles FUSE mount disappearing while container survives.
-5. Stop and remove container (find by `devcontainer.local_folder` label; `docker stop` then `docker rm`)
-6. Unmount bindfs
-7. Remove mount directory
-8. Remove staging directory `~/.colima-mounts/.dcx-<name>-files/` if it exists (non-fatal)
+2. Resolve workspace; fail exit 2 if missing
+3. Guard against recursive mounts: fail if path is under `~/.colima-mounts/dcx-*` (a managed path)
+4. Compute mount point
+5. If no mount AND no container: print "nothing to do", exit 0 (idempotent). Handles FUSE mount disappearing while container survives.
+6. Stop and remove container (find by `devcontainer.local_folder` label; `docker stop` then `docker rm`)
+7. Kill sync daemon via SIGTERM (if PID file exists in staging dir)
+8. Unmount bindfs
+9. Remove mount directory
+10. Remove staging directory `~/.colima-mounts/.dcx-<name>-files/` if it exists (non-fatal)
 9. On SIGINT during unmount: complete unmount before exit
 
 ---
@@ -197,8 +220,10 @@ dcx clean [--workspace-folder PATH] [--all] [--purge] [--dry-run] [--yes]
    - Remove container + runtime image (by repo tag, not `--force`, to avoid removing build image)
    - If `--purge`: attempt to remove `dcx-base:<mount_name>` tag (alias created during `dcx up` for `"image"` field configs; no-op for `"build"` configs)
    - Remove captured volumes (if any)
+   - Kill sync daemon via SIGTERM (if PID file exists in staging dir)
    - Unmount bindfs
    - Remove mount directory
+   - Remove staging directory (non-fatal)
 9. Scan for orphaned mounts (mounted but no container): unmount + remove
 10. Clean orphaned `vsc-*-uid` runtime images (runtime images without containers)
 11. If `--purge`: clean orphaned `vsc-*` build images (no `-uid` suffix) without containers — handles `"build"` configs and the two-step `dcx clean` then `dcx clean --purge` workflow
@@ -208,6 +233,62 @@ dcx clean [--workspace-folder PATH] [--all] [--purge] [--dry-run] [--yes]
 - Same, but iterate all `dcx-*` mounts, continue on individual failures
 - If `--purge`: after per-mount cleanup, deduplicate + remove all build images, sweep remaining `dcx-*` volumes
 - Print summary count
+
+---
+
+### `dcx status` {#cmd-status}
+
+**Usage:**
+```bash
+dcx status
+```
+
+**Behavior:**
+1. Query all `dcx-*` mounts in `~/.colima-mounts/`
+2. For each mount, determine status:
+   - `running` — mount exists and is accessible, container running
+   - `orphaned` — mount exists and is accessible, no container
+   - `stale mount` — mount directory exists but is not accessible (unmounted)
+   - `empty dir` — mount directory doesn't exist, no container
+3. Print a formatted table with mount name, status, daemon status (running/stopped), and container ID (if applicable)
+4. Exit 0 (always succeeds, even if no mounts exist)
+
+---
+
+### `dcx doctor` {#cmd-doctor}
+
+**Usage:**
+```bash
+dcx doctor
+```
+
+**Behavior:**
+1. Check prerequisites and report status:
+   - Docker available (running)
+   - `devcontainer` CLI installed
+   - `bindfs` installed
+   - Relay directory `~/.colima-mounts/` accessible
+2. Print a report with each check's status (✓ pass, ✗ fail)
+3. If any check fails, suggest remediation steps (e.g., install command)
+4. Exit 0 if all checks pass, 1 if any check fails
+
+---
+
+### `dcx completions` {#cmd-completions}
+
+**Usage:**
+```bash
+dcx completions SHELL
+```
+
+**Arguments:**
+- `SHELL` — shell type: `bash`, `fish`, `zsh`, `powershell`
+
+**Behavior:**
+1. Generate shell completion script for the specified shell
+2. Print to stdout
+3. User pipes to shell rc file: `dcx completions bash >> ~/.bashrc`
+4. Exit 0
 
 ---
 

@@ -96,4 +96,32 @@ mod tests {
         let result = run_stream("__dcx_nonexistent__", &[] as &[&str]);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn run_capture_captures_stdout() {
+        let result = run_capture("echo", &["hello world"]).expect("echo should succeed");
+        assert_eq!(result.status, 0);
+        assert_eq!(result.stdout.trim(), "hello world");
+    }
+
+    #[test]
+    fn run_capture_captures_stderr() {
+        let result = run_capture("sh", &["-c", "echo error >&2"]).expect("sh should succeed");
+        assert_eq!(result.status, 0);
+        assert_eq!(result.stderr.trim(), "error");
+    }
+
+    #[test]
+    fn run_capture_returns_nonzero_exit_code() {
+        let result = run_capture("sh", &["-c", "exit 42"]).expect("sh should run");
+        assert_eq!(result.status, 42);
+    }
+
+    #[test]
+    fn run_capture_handles_utf8_output() {
+        let result = run_capture("printf", &["hello\\nworld"]).expect("printf should succeed");
+        assert_eq!(result.status, 0);
+        assert!(result.stdout.contains("hello"));
+        assert!(result.stdout.contains("world"));
+    }
 }

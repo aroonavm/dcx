@@ -13,6 +13,7 @@ use crate::naming::{mount_name, relay_dir, scan_relay};
 use crate::platform;
 use crate::progress;
 use crate::signals;
+use crate::up::staging_dir;
 use crate::workspace::resolve_workspace;
 
 // ── Data structures ───────────────────────────────────────────────────────────
@@ -275,6 +276,20 @@ fn clean_one(
         eprintln!("Note: Could not remove base image tag: {e}");
     }
 
+    // Kill sync daemon if running (same pattern as dcx down).
+    let staging = staging_dir(mount_point);
+    let pid_file = staging.join(".sync-daemon.pid");
+    if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+        let pid = pid_str.trim();
+        if !pid.is_empty() {
+            let _ = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid)
+                .status();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+
     // Unmount if mounted.
     if is_mounted {
         do_unmount(mount_point)?;
@@ -283,6 +298,16 @@ fn clean_one(
     // Remove directory if it exists
     if mount_point.exists() {
         remove_mount_dir(mount_point)?;
+    }
+
+    // Remove staging directory (non-fatal, same as dcx down).
+    if staging.exists()
+        && let Err(e) = std::fs::remove_dir_all(&staging)
+    {
+        eprintln!(
+            "Warning: Failed to remove staging dir {}: {e}",
+            staging.display()
+        );
     }
 
     let action = if has_container {
@@ -814,7 +839,6 @@ mod tests {
     // 2. Call clean_one
     // 3. Verify state changed as expected (container gone, image removed, mount gone)
     //
-    // This is tested indirectly by E2E tests (tests/e2e/test_dcx_clean.sh) which exercise
-    // the full clean workflow. Direct unit testing would require Docker mocking or a running
-    // Docker daemon with test containers.
+    // This is tested indirectly by E2E tests which exercise the full clean workflow.
+    // Direct unit testing would require Docker mocking or a running Docker daemon with test containers.
 }

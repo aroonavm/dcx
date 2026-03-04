@@ -24,6 +24,7 @@ up:
   files:                        # (list, optional) files to stage into container
     - path: ~/.gitconfig
     - path: ~/.claude.json
+      sync: true                # (bool, optional) enable live sync for this file
 ```
 
 ### Supported Keys
@@ -32,7 +33,9 @@ up:
 |-----|------|-----------|---------|-------|
 | `up.network` | string | `--network` | `minimal` | One of: `restricted`, `minimal`, `host`, `open`. Invalid values logged with warning, uses default. |
 | `up.yes` | bool | `--yes` | `false` | Skip confirmation prompts for non-owned directories. |
-| `up.files` | list | `--file` (repeatable) | empty | Paths to stage into container. Tilde (`~`) expanded at runtime. |
+| `up.files` | list | `--file` (repeatable) | empty | Paths to stage into container. Tilde (`~`) expanded at runtime. Each file has `path` (required) and `sync` (optional, default false). |
+| `up.files[].path` | string | — | — | Path to stage (tilde-expanded). |
+| `up.files[].sync` | bool | — | `false` | Enable live sync: keep file in sync bidirectionally via inotify/FSEvents daemon (watches parent directory, filters by filename; 1s polling fallback). Use for auth files updated atomically (temp+rename). |
 
 ### Unsupported Options
 
@@ -87,6 +90,29 @@ Values are **OR-combined**: if either YAML or CLI sets it true, prompts are skip
 # Result: stages ~/.ssh/config, then ~/.gitconfig, then ~/.claude.json
 ```
 
+**Sync behavior:**
+
+Each file in `up.files` can be marked with `sync: true` for live bidirectional syncing:
+
+- **`sync: false` (default)**: File is hardlinked into the container (writes propagate back), or copied as readonly if on a different filesystem. Good for static configs.
+
+- **`sync: true`**: File is copied to staging and kept in sync via background daemon (uses inotify/FSEvents for immediate change detection, SHA256-based debouncing). Perfect for auth files atomically updated by host apps.
+
+Example scenarios:
+
+```yaml
+up:
+  files:
+    - path: ~/.gitconfig          # Standard: rarely changes, hardlink OK
+    - path: ~/.ssh/config         # Standard: rarely changes, hardlink OK
+    - path: ~/.claude.json        # Live sync: updated atomically when you auth, container needs latest
+      sync: true
+    - path: ~/.docker/config.json # Live sync: if Docker auth changes while container runs
+      sync: true
+```
+
+**Note:** Live sync requires file exists at startup. If a synced file doesn't exist, staging is skipped with a warning.
+
 ## Full Annotated Example
 
 ```yaml
@@ -108,13 +134,17 @@ up:
   # Useful in CI/CD or when you trust all workspaces in a mount.
   yes: false
 
-  # Files to copy into container at their original paths.
+  # Files to mount into container at their original paths.
   # Paths are tilde-expanded at runtime using $HOME.
   # If a file doesn't exist on the host, it's skipped with a warning.
   files:
-    - path: ~/.gitconfig        # Git configuration (will use GIT_CONFIG_GLOBAL env var if in mounts)
-    - path: ~/.ssh/config       # SSH config (if you have one)
-    - path: ~/.gitignore        # Global gitignore
+    - path: ~/.gitconfig        # Standard mount: Git configuration
+    - path: ~/.ssh/config       # Standard mount: SSH config
+    - path: ~/.gitignore        # Standard mount: Global gitignore
+    - path: ~/.claude.json      # Live sync: Auth file updated atomically by host app
+      sync: true                # Keep in sync via inotify/FSEvents daemon
+    - path: ~/.docker/config.json  # Live sync: Container needs latest docker credentials
+      sync: true
 ```
 
 ## Troubleshooting
