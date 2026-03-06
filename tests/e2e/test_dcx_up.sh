@@ -9,8 +9,8 @@ echo "=== dcx up ==="
 
 RELAY="$HOME/.colima-mounts"
 
-# --- Happy path ---
-echo "--- happy path ---"
+# --- Happy path (all defaults: no dcx_config.yaml, no --network flag, no --file flags) ---
+echo "--- happy path (defaults) ---"
 WS=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS"' EXIT
 
@@ -21,6 +21,21 @@ assert_exit "up exits 0" 0 "$code"
 WS_RELAY=$(relay_dir_for "$WS")
 assert_dir_exists "mount directory created in relay" "$WS_RELAY"
 is_mounted "$WS_RELAY" && pass "mount is active in mount table" || fail "mount not in mount table"
+
+# --- Default network mode (minimal) ---
+echo "--- default network mode (minimal) ---"
+# Verify container has dcx.network-mode=minimal when no --network flag is passed
+CONTAINER_ID=$(docker ps -a --filter "label=devcontainer.local_folder=${WS_RELAY}" --format "{{.ID}}" 2>/dev/null | head -1)
+if [ -n "$CONTAINER_ID" ]; then
+    NETWORK_MODE=$(docker inspect --format='{{index .Config.Labels "dcx.network-mode"}}' "$CONTAINER_ID" 2>/dev/null || echo "")
+    if [ "$NETWORK_MODE" = "minimal" ]; then
+        pass "container has network mode minimal (default)"
+    else
+        fail "container has network mode '$NETWORK_MODE', expected 'minimal' (default)"
+    fi
+else
+    fail "no container found to check default network mode"
+fi
 
 # --- Idempotent reuse ---
 echo "--- idempotent reuse ---"

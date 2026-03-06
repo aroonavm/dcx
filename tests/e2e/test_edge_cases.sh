@@ -75,6 +75,34 @@ code=0
 assert_exit "up recovers from stale mount" 0 "$code"
 is_mounted "$MOUNT_DIR4" && pass "mount is healthy after stale recovery" || fail "mount still unhealthy after recovery"
 
+# --- Missing colima.yaml (dcx up succeeds without colima config) ---
+echo "--- missing colima.yaml ---"
+# Platform-specific path mirrors colima.rs colima_config_path()
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    COLIMA_CONF_PATH="$HOME/.colima/default/colima.yaml"
+else
+    COLIMA_CONF_PATH="$HOME/.config/colima/default/colima.yaml"
+fi
+COLIMA_CONF_BAK="${COLIMA_CONF_PATH}.dcx-e2e-bak"
+WS_NC=$(make_workspace)
+trap 'e2e_cleanup; rm -rf "$WS" "$WS_NC"; [ -f "$COLIMA_CONF_BAK" ] && mv "$COLIMA_CONF_BAK" "$COLIMA_CONF_PATH"' EXIT
+
+moved_conf=false
+if [ -f "$COLIMA_CONF_PATH" ]; then
+    mv "$COLIMA_CONF_PATH" "$COLIMA_CONF_BAK"
+    moved_conf=true
+fi
+
+code=0
+"$DCX" up --workspace-folder "$WS_NC" 2>/dev/null || code=$?
+assert_exit "up succeeds without colima.yaml" 0 "$code"
+"$DCX" down --workspace-folder "$WS_NC" 2>/dev/null || true
+
+if $moved_conf; then
+    mv "$COLIMA_CONF_BAK" "$COLIMA_CONF_PATH"
+fi
+rm -rf "$WS_NC"
+
 # --- Shell completion is valid bash syntax ---
 echo "--- bash completion validity ---"
 code=0

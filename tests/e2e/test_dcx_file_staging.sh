@@ -9,8 +9,8 @@ echo "=== dcx file staging ==="
 
 RELAY="$HOME/.colima-mounts"
 
-# --- File staging via dcx_config.yaml ---
-echo "--- file staging via dcx_config.yaml ---"
+# --- File staging via dcx_config.yaml (sync: false, default — hardlink mode) ---
+echo "--- file staging via dcx_config.yaml (sync: false, default) ---"
 WS=$(make_workspace)
 
 # Create a test file on the same filesystem as the relay dir (same as ~/.colima-mounts).
@@ -41,10 +41,11 @@ assert_exit "up exits 0 with dcx_config.yaml file" 0 "$code"
 CONTENT=$("$DCX" exec --workspace-folder "$WS" -- cat "$TEST_FILE" 2>/dev/null)
 assert_eq "file is readable inside container" "host content" "$CONTENT"
 
+# File staged without sync:true → uses hardlink; writes inside container propagate to host.
 # Verify hardlink bidirectionality: write inside container → read on host.
 "$DCX" exec --workspace-folder "$WS" -- bash -c "echo 'container write' > '$TEST_FILE'" 2>/dev/null
 HOST_CONTENT=$(cat "$TEST_FILE")
-assert_eq "write inside container propagates to host file" "container write" "$HOST_CONTENT"
+assert_eq "write inside container propagates to host file (hardlink mode)" "container write" "$HOST_CONTENT"
 
 # Verify staging dir exists alongside relay dir.
 RELAY_DIR=$(relay_dir_for "$WS")
