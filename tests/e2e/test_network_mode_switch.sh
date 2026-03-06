@@ -106,4 +106,26 @@ else
     fail "orphaned container still exists after down"
 fi
 
+# --- Network mode set via dcx_config.yaml (YAML wins over CLI default) ---
+echo "--- dcx_config.yaml up.network ---"
+WS_YML=$(make_workspace)
+trap 'e2e_cleanup; rm -rf "$WS" "$WS_YML"' EXIT
+cat > "$WS_YML/.devcontainer/dcx_config.yaml" <<'EOF'
+up:
+  network: open
+EOF
+code=0
+"$DCX" up --workspace-folder "$WS_YML" 2>/dev/null || code=$?
+assert_exit "up with dcx_config.yaml up.network exits 0" 0 "$code"
+RELAY_YML=$(relay_dir_for "$WS_YML")
+CONTAINER_YML=$(docker ps -a --filter "label=devcontainer.local_folder=${RELAY_YML}" --format "{{.ID}}" 2>/dev/null | head -1)
+if [ -n "$CONTAINER_YML" ]; then
+    NET=$(docker inspect --format='{{index .Config.Labels "dcx.network-mode"}}' "$CONTAINER_YML" 2>/dev/null || echo "")
+    [ "$NET" = "open" ] && pass "dcx_config.yaml up.network:open applied to container" || fail "expected open, got '$NET'"
+else
+    fail "no container found for dcx_config.yaml network test"
+fi
+"$DCX" down --workspace-folder "$WS_YML" 2>/dev/null || true
+rm -rf "$WS_YML"
+
 summary

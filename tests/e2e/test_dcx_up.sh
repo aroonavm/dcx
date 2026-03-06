@@ -9,7 +9,8 @@ echo "=== dcx up ==="
 
 RELAY="$HOME/.colima-mounts"
 
-# --- Happy path (all defaults: no dcx_config.yaml, no --network flag, no --file flags) ---
+# --- Happy path (all defaults: no dcx_config.yaml → empty up.files, no --network flag → minimal,
+#     no --file flags; auto-detects .devcontainer/devcontainer.json without --config-dir) ---
 echo "--- happy path (defaults) ---"
 WS=$(make_workspace)
 trap 'e2e_cleanup; rm -rf "$WS"' EXIT
@@ -56,6 +57,9 @@ assert_contains "dry-run shows Would mount" "$dry_out" "Would mount:"
 assert_contains "dry-run shows Would run" "$dry_out" "Would run:"
 # Dry-run must not create a relay dir for WS2.
 assert_dir_missing "dry-run creates no mount" "$(relay_dir_for "$WS2")"
+# Verify --no-cache is forwarded as --build-no-cache in the devcontainer command
+no_cache_out=$("$DCX" up --dry-run --no-cache --workspace-folder "$WS2" 2>/dev/null)
+assert_contains "dry-run --no-cache shows --build-no-cache" "$no_cache_out" "--build-no-cache"
 rm -rf "$WS2"
 
 # --- Rollback on devcontainer failure ---
@@ -119,6 +123,16 @@ else
     code=0
     "$DCX" up --workspace-folder "$WS_ROOT" --yes 2>/dev/null || code=$?
     [ "$code" -ne 4 ] && pass "up non-owned dir --yes skips prompt" || fail "up --yes still returned 4"
+    # YAML up.yes: true skips prompt without --yes CLI flag
+    cat > "$WS_ROOT/.devcontainer/dcx_config.yaml" <<'EOF'
+up:
+  yes: true
+EOF
+    code=0
+    "$DCX" up --workspace-folder "$WS_ROOT" 2>/dev/null || code=$?
+    [ "$code" -ne 4 ] && pass "dcx_config.yaml up.yes:true skips prompt" || fail "dcx_config.yaml up.yes:true still prompted (exit 4)"
+    "$DCX" down --workspace-folder "$WS_ROOT" 2>/dev/null || true
+    rm -f "$WS_ROOT/.devcontainer/dcx_config.yaml"
     sudo chown "$(id -u):$(id -g)" "$WS_ROOT"
     rm -rf "$WS_ROOT"
 fi
@@ -134,5 +148,17 @@ assert_contains "up shows devcontainer step" "$stderr_out" "→ Starting devcont
 assert_contains "up shows done step" "$stderr_out" "→ Done."
 e2e_cleanup
 rm -rf "$WS4"
+
+# --- --workspace-folder default (current directory) ---
+echo "--- --workspace-folder default (current dir) ---"
+WS5=$(make_workspace)
+trap 'e2e_cleanup; rm -rf "$WS" "$WS5"' EXIT
+code=0
+# Run without --workspace-folder: dcx must use $PWD as workspace
+(cd "$WS5" && "$DCX" up 2>/dev/null) || code=$?
+assert_exit "up without --workspace-folder exits 0 from workspace dir" 0 "$code"
+is_mounted "$(relay_dir_for "$WS5")" && pass "relay mount created using cwd as workspace" || fail "relay mount not created from cwd"
+"$DCX" down --workspace-folder "$WS5" 2>/dev/null
+rm -rf "$WS5"
 
 summary
