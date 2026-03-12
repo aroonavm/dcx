@@ -9,7 +9,7 @@ use crate::network_mode::NetworkMode;
     version,
     about = "Dynamic workspace mounting wrapper for Colima devcontainers",
     long_about = "dcx wraps `devcontainer` to manage bindfs mounts for Colima.\n\n\
-                  Managed subcommands: up, exec, down, clean, status, doctor\n\
+                  Managed subcommands: up, exec, down, logs, clean, status, doctor\n\
                   All other subcommands are forwarded to `devcontainer` unchanged."
 )]
 pub struct Cli {
@@ -80,6 +80,30 @@ pub enum Commands {
         /// Workspace folder path (default: current directory)
         #[arg(long, value_name = "PATH")]
         workspace_folder: Option<PathBuf>,
+    },
+
+    /// View or stream logs from the container for a workspace
+    /// Mirrors `docker logs` — see `docker logs --help` for flag details.
+    Logs {
+        /// Workspace folder path (default: current directory)
+        #[arg(long, value_name = "PATH")]
+        workspace_folder: Option<PathBuf>,
+
+        /// Follow log output (stream new lines as they arrive)
+        #[arg(long, short = 'f')]
+        follow: bool,
+
+        /// Show logs since timestamp or duration (e.g. 2024-01-01T00:00:00Z, 10m, now)
+        #[arg(long, value_name = "VALUE")]
+        since: Option<String>,
+
+        /// Show logs before timestamp or duration
+        #[arg(long, value_name = "VALUE")]
+        until: Option<String>,
+
+        /// Number of lines to show from the end of the logs (e.g. 20, all)
+        #[arg(long, value_name = "VALUE")]
+        tail: Option<String>,
     },
 
     /// Clean up dcx-managed mounts

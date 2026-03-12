@@ -11,6 +11,7 @@ mod down;
 mod exec;
 mod exit_codes;
 mod format;
+mod logs;
 mod mount_table;
 mod naming;
 mod network_mode;
@@ -82,6 +83,22 @@ fn main() {
         }
         cli::Commands::Down { workspace_folder } => {
             std::process::exit(down::run_down(&home_dir(), workspace_folder));
+        }
+        cli::Commands::Logs {
+            workspace_folder,
+            follow,
+            since,
+            until,
+            tail,
+        } => {
+            std::process::exit(logs::run_logs(
+                &home_dir(),
+                workspace_folder.as_deref(),
+                follow,
+                since.as_deref(),
+                until.as_deref(),
+                tail.as_deref(),
+            ));
         }
         cli::Commands::Clean {
             workspace_folder,

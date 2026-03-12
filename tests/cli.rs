@@ -17,6 +17,7 @@ fn help_lists_all_managed_subcommands() {
         .stdout(predicate::str::contains("up"))
         .stdout(predicate::str::contains("exec"))
         .stdout(predicate::str::contains("down"))
+        .stdout(predicate::str::contains("logs"))
         .stdout(predicate::str::contains("clean"))
         .stdout(predicate::str::contains("status"))
         .stdout(predicate::str::contains("doctor"));
@@ -697,6 +698,34 @@ fn clean_emits_progress_to_stderr() {
         );
     }
     // If Docker is unavailable (exit 1), no progress before the docker check — skip.
+}
+
+// --- dcx logs ---
+
+#[test]
+fn logs_help_flag_succeeds() {
+    dcx()
+        .args(["logs", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--follow"))
+        .stdout(predicate::str::contains("--since"))
+        .stdout(predicate::str::contains("--until"))
+        .stdout(predicate::str::contains("--tail"));
+}
+
+#[test]
+fn logs_nonexistent_workspace_exits_nonzero() {
+    // A workspace path that does not exist must fail.
+    // exit 1 if Docker is unavailable; exit 2 if Docker is available (USAGE_ERROR).
+    dcx()
+        .args([
+            "logs",
+            "--workspace-folder",
+            "/nonexistent/__dcx_test_path__",
+        ])
+        .assert()
+        .failure();
 }
 
 // --- dcx completions ---

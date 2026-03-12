@@ -195,6 +195,38 @@ dcx down [--workspace-folder PATH]
 
 ---
 
+### `dcx logs` {#cmd-logs}
+
+**Usage:**
+```bash
+dcx logs [--workspace-folder PATH] [--follow] [--since VALUE] [--until VALUE] [--tail VALUE]
+```
+
+**Flags:**
+- `--workspace-folder PATH` — workspace directory (default: current dir)
+- `--follow` — stream logs (equivalent to `docker logs --follow`)
+- `--since VALUE` — show logs since timestamp or relative duration (e.g., `2024-01-01T00:00:00Z`, `10m`, `now`)
+- `--until VALUE` — show logs before timestamp or duration
+- `--tail VALUE` — number of lines to show from end of logs (e.g., `20`, `all`)
+
+**Behavior:**
+1. Validate Docker available; fail exit 1
+2. Resolve workspace path; fail exit 2 if missing
+3. Compute mount point
+4. Find container (running or stopped) by `devcontainer.local_folder` label on the relay mount point
+5. If no container found: error message, exit 1
+6. Build `docker logs` args: always include `--timestamps`, pass through all provided flags (--follow, --since, --until, --tail) verbatim
+7. Stream output from `docker logs --timestamps ...` directly to terminal; Ctrl+C exits cleanly
+8. Forward docker's exit code
+
+**Notes:**
+- Mirrors `docker logs` behavior exactly — all validation/filtering by Docker
+- Works with both running and stopped containers
+- Output includes RFC3339 timestamps added by Docker (one per line)
+- No dcx-specific log file writing; all output goes to terminal
+
+---
+
 ### `dcx clean` {#cmd-clean}
 
 **Usage:**
