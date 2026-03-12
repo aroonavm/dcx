@@ -39,7 +39,8 @@ fn up_missing_workspace_exits_nonzero() {
     // If Docker is unavailable, exit early with Docker error (acceptable).
     // If Docker is available, error message should mention workspace missing.
     assert!(
-        stderr.contains("Docker is not available") || stderr.contains("Workspace directory does not exist"),
+        stderr.contains("Docker is not available")
+            || stderr.contains("Workspace directory does not exist"),
         "stderr should mention Docker unavailable or workspace missing, got: {stderr}"
     );
 }
@@ -58,7 +59,9 @@ fn up_dir_without_devcontainer_config_exits_nonzero() {
     // If Docker is unavailable, exit early with Docker error (acceptable).
     // If Docker is available, error message should mention missing devcontainer config.
     assert!(
-        stderr.contains("Docker is not available") || stderr.contains("devcontainer") || stderr.contains("configuration"),
+        stderr.contains("Docker is not available")
+            || stderr.contains("devcontainer")
+            || stderr.contains("configuration"),
         "stderr should mention Docker unavailable or missing devcontainer config, got: {stderr}"
     );
 }
@@ -205,7 +208,9 @@ fn up_nonexistent_relay_path_exits_nonzero() {
     // If Docker is unavailable, exit early with Docker error (acceptable).
     // If Docker is available, error message should mention missing path or relay dir.
     assert!(
-        stderr.contains("Docker is not available") || stderr.contains("does not exist") || stderr.contains("colima-mounts"),
+        stderr.contains("Docker is not available")
+            || stderr.contains("does not exist")
+            || stderr.contains("colima-mounts"),
         "stderr should mention Docker unavailable, missing path, or colima-mounts, got: {stderr}"
     );
 }

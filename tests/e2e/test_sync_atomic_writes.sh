@@ -85,7 +85,7 @@ assert_exit "second up exits 0" 0 "$code"
 # Count matching sync daemon processes for this workspace
 # We search for the PID file path to uniquely identify daemons for this workspace
 DAEMON_PID_AFTER=$(cat "$STAGING_DIR/.sync-daemon.pid" 2>/dev/null || echo "")
-DAEMON_COUNT=$(pgrep -c -f "dcx _sync-daemon.*$(basename "$pid_file")" 2>/dev/null || echo "0")
+DAEMON_COUNT=$(pgrep -c -f "dcx _sync-daemon.*$(basename "$STAGING_DIR")" 2>/dev/null || echo "0")
 
 # Assert that the PID didn't change (same daemon is still running)
 assert_eq "daemon PID unchanged on second up" "$DAEMON_PID_BEFORE" "$DAEMON_PID_AFTER"

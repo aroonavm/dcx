@@ -185,8 +185,7 @@ pub fn run_exec(
         &command,
     );
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let code = cmd::run_stream("devcontainer", &args_str).unwrap_or(exit_codes::PREREQ_NOT_FOUND);
-    code
+    cmd::run_stream("devcontainer", &args_str).unwrap_or(exit_codes::PREREQ_NOT_FOUND)
 }
 
 #[cfg(test)]
