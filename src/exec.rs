@@ -39,33 +39,26 @@ pub fn mount_not_found_error(workspace: &Path, mount_dir_exists: bool) -> String
     }
 }
 
-/// Build the argument list for `devcontainer exec`.
+/// Build the argument list for `docker exec`.
 ///
-/// Passes `--container-id` (reliable container lookup, bypasses config-hash
-/// resolution), `--workspace-folder` (original workspace path), and optionally
-/// `--config` to specify the devcontainer config.
+/// Uses `docker exec -w <workspace>` to set the working directory directly,
+/// bypassing devcontainer exec entirely. The container's default user (set by
+/// devcontainer during creation to `remoteUser`) is inherited automatically.
+/// This avoids devcontainer exec's config resolution and lifecycle hook
+/// re-execution, which caused concurrent session conflicts.
 pub fn build_exec_args(
     container_id: &str,
     workspace_path: &Path,
-    config: Option<&Path>,
     command: &[String],
 ) -> Vec<String> {
     let mut args = vec![
         "exec".to_string(),
-        "--container-id".to_string(),
-        container_id.to_string(),
-        "--workspace-folder".to_string(),
+        "-w".to_string(),
         workspace_path.to_string_lossy().into_owned(),
+        container_id.to_string(),
     ];
-    if let Some(cfg) = config {
-        args.push("--config".to_string());
-        args.push(cfg.to_string_lossy().into_owned());
-    }
-    if !command.is_empty() {
-        args.push("--".to_string());
-        for c in command {
-            args.push(c.clone());
-        }
+    for c in command {
+        args.push(c.clone());
     }
     args
 }
@@ -96,14 +89,16 @@ pub fn run_exec(
         }
     };
 
-    // 2b. Resolve --config-dir to an absolute path and locate devcontainer.json inside it.
-    let devcontainer_config: Option<PathBuf> = if let Some(dir) = config_dir {
+    // 2b. Validate --config-dir if provided (kept for CLI compatibility).
+    // With docker exec, config resolution is unnecessary — the container was already
+    // configured by dcx up. We still validate the path exists for user feedback.
+    if let Some(ref dir) = config_dir {
         let abs_dir = if dir.is_absolute() {
-            dir
+            dir.clone()
         } else {
             std::env::current_dir()
-                .map(|cwd| cwd.join(&dir))
-                .unwrap_or(dir)
+                .map(|cwd| cwd.join(dir))
+                .unwrap_or(dir.clone())
         };
         if !abs_dir.exists() {
             eprintln!("Config directory not found: {}", abs_dir.display());
@@ -118,10 +113,7 @@ pub fn run_exec(
             eprintln!("devcontainer.json not found in: {}", abs_dir.display());
             return exit_codes::USAGE_ERROR;
         }
-        Some(json)
-    } else {
-        None
-    };
+    }
     progress::step(&format!(
         "Resolving workspace path: {}",
         workspace.display()
@@ -172,20 +164,17 @@ pub fn run_exec(
         progress::step(&format!("Network: {}", network_mode));
     }
 
-    // 8. Delegate to `devcontainer exec`.
-    // Pass --container-id for reliable container lookup, --workspace-folder pointing
-    // to the original workspace path, and optionally --config. SIGINT is forwarded
-    // naturally to the child (same process group).
+    // 8. Delegate to `docker exec` with `-w` to set working directory.
+    // Uses docker exec directly instead of devcontainer exec to avoid:
+    // - Config resolution issues (devcontainer reads source config, not override)
+    // - Lifecycle hook re-execution (postAttachCommand races in concurrent sessions)
+    // The container's default user is already set to remoteUser by devcontainer during
+    // creation, so no `-u` flag is needed. SIGINT is forwarded naturally (same process group).
     progress::step("Running exec in container...");
 
-    let args = build_exec_args(
-        &container_id,
-        &workspace,
-        devcontainer_config.as_deref(),
-        &command,
-    );
+    let args = build_exec_args(&container_id, &workspace, &command);
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    cmd::run_stream("devcontainer", &args_str).unwrap_or(exit_codes::PREREQ_NOT_FOUND)
+    cmd::run_stream("docker", &args_str).unwrap_or(exit_codes::PREREQ_NOT_FOUND)
 }
 
 #[cfg(test)]
@@ -218,51 +207,49 @@ mod tests {
     #[test]
     fn exec_args_includes_container_id() {
         let ws = Path::new("/home/user/myproject");
-        let args = build_exec_args("abc123", ws, None, &[]);
-        let ci = args.iter().position(|a| a == "--container-id").unwrap();
-        assert_eq!(args[ci + 1], "abc123");
+        let args = build_exec_args("abc123", ws, &[]);
+        assert!(args.contains(&"abc123".to_string()));
     }
 
     #[test]
-    fn exec_args_includes_workspace_folder() {
+    fn exec_args_sets_working_directory() {
         let ws = Path::new("/home/user/myproject");
-        let args = build_exec_args("abc123", ws, None, &[]);
-        let wi = args.iter().position(|a| a == "--workspace-folder").unwrap();
+        let args = build_exec_args("abc123", ws, &[]);
+        let wi = args.iter().position(|a| a == "-w").unwrap();
         assert_eq!(args[wi + 1], "/home/user/myproject");
     }
 
     #[test]
-    fn exec_args_appends_command_after_separator() {
+    fn exec_args_appends_command_directly() {
         let ws = Path::new("/home/user/myproject");
         let cmd = vec!["bash".to_string(), "-c".to_string(), "echo hi".to_string()];
-        let args = build_exec_args("abc123", ws, None, &cmd);
-        let sep = args.iter().position(|a| a == "--").unwrap();
-        assert_eq!(args[sep + 1], "bash");
-        assert_eq!(args[sep + 2], "-c");
-        assert_eq!(args[sep + 3], "echo hi");
+        let args = build_exec_args("abc123", ws, &cmd);
+        // Command follows container ID directly (no -- separator needed for docker exec)
+        let cid_pos = args.iter().position(|a| a == "abc123").unwrap();
+        assert_eq!(args[cid_pos + 1], "bash");
+        assert_eq!(args[cid_pos + 2], "-c");
+        assert_eq!(args[cid_pos + 3], "echo hi");
     }
 
     #[test]
-    fn exec_args_no_separator_when_command_empty() {
+    fn exec_args_no_command_when_empty() {
         let ws = Path::new("/home/user/myproject");
-        let args = build_exec_args("abc123", ws, None, &[]);
-        assert!(!args.contains(&"--".to_string()));
+        let args = build_exec_args("abc123", ws, &[]);
+        // Only: exec -w <workspace> <container_id>
+        assert_eq!(args.len(), 4);
     }
 
     #[test]
-    fn exec_args_includes_config_when_provided() {
+    fn exec_args_uses_docker_exec_format() {
         let ws = Path::new("/home/user/myproject");
-        let cfg = Path::new("/home/user/project/.devcontainer/devcontainer.json");
-        let args = build_exec_args("abc123", ws, Some(cfg), &[]);
-        let ci = args.iter().position(|a| a == "--config").unwrap();
-        assert_eq!(args[ci + 1], cfg.to_string_lossy().as_ref());
-    }
-
-    #[test]
-    fn exec_args_no_config_flag_when_absent() {
-        let ws = Path::new("/home/user/myproject");
-        let args = build_exec_args("abc123", ws, None, &[]);
-        assert!(!args.contains(&"--config".to_string()));
+        let cmd = vec!["echo".to_string(), "hello".to_string()];
+        let args = build_exec_args("abc123", ws, &cmd);
+        assert_eq!(args[0], "exec");
+        assert_eq!(args[1], "-w");
+        assert_eq!(args[2], "/home/user/myproject");
+        assert_eq!(args[3], "abc123");
+        assert_eq!(args[4], "echo");
+        assert_eq!(args[5], "hello");
     }
 
     // --- mount_not_found_error ---

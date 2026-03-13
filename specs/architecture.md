@@ -157,19 +157,19 @@ dcx exec [--workspace-folder PATH] [--config-dir DIR] COMMAND [ARGS...]
 
 **Flags:**
 - `--workspace-folder PATH` — workspace directory (default: current dir)
-- `--config-dir DIR` — directory containing `devcontainer.json`; resolves `devcontainer.json` from within and forwards it to `devcontainer exec`. Overridden by `DCX_DEVCONTAINER_CONFIG_DIR_PATH` if both are set (flag wins).
+- `--config-dir DIR` — directory containing `devcontainer.json`; validated but not forwarded (container was already configured by `dcx up`). Overridden by `DCX_DEVCONTAINER_CONFIG_DIR_PATH` if both are set (flag wins).
 
 **Behavior:**
 1. Validate Docker available; fail exit 1
 2. Resolve workspace path
-3. Resolve `--config-dir` to absolute path; verify it is a directory containing `devcontainer.json`; fail exit 2 if not found or missing `devcontainer.json`
+3. Validate `--config-dir` if provided: resolve to absolute path, verify it is a directory containing `devcontainer.json`; fail exit 2 if not found or missing `devcontainer.json`
 4. Guard: reject `~/.colima-mounts/dcx-*` paths
 5. Verify mount exists + healthy
 6. Find running container by `devcontainer.local_folder` label on the relay mount point
 7. Print network mode (read from container label `dcx.network-mode`)
-8. Delegate to `devcontainer exec` with `--container-id` (reliable container lookup), `--workspace-folder` (original workspace path), and `--config` if provided
+8. Delegate to `docker exec -w <original_workspace_path> <container_id>` — uses docker directly instead of devcontainer exec to avoid config resolution issues and lifecycle hook re-execution that caused concurrent session conflicts. The container's default user (set to `remoteUser` by devcontainer during creation) is inherited automatically.
 9. The user's shell lands in the original workspace path (e.g., `/home/user/myproject`)
-10. Forward SIGINT to child process
+10. Forward SIGINT to child process (same process group)
 
 ---
 
