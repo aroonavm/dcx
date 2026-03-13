@@ -167,7 +167,7 @@ dcx exec [--workspace-folder PATH] [--config-dir DIR] COMMAND [ARGS...]
 5. Verify mount exists + healthy
 6. Find running container by `devcontainer.local_folder` label on the relay mount point
 7. Print network mode (read from container label `dcx.network-mode`)
-8. Delegate to `docker exec -w <original_workspace_path> <container_id>` — uses docker directly instead of devcontainer exec to avoid config resolution issues and lifecycle hook re-execution that caused concurrent session conflicts. The container's default user (set to `remoteUser` by devcontainer during creation) is inherited automatically.
+8. Delegate to `docker exec` with `-i` (stdin open) and `-t` (pseudo-TTY) flags when appropriate. `-i` is always passed for input passthrough. `-t` is added when stdin is a terminal (interactive sessions), omitted for piped input. Uses docker directly instead of devcontainer exec to avoid config resolution issues and lifecycle hook re-execution that caused concurrent session conflicts. The container's default user (set to `remoteUser` by devcontainer during creation) is inherited automatically. Command format: `docker exec -i [-t] -w <original_workspace_path> <container_id>`
 9. The user's shell lands in the original workspace path (e.g., `/home/user/myproject`)
 10. Forward SIGINT to child process (same process group)
 

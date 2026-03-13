@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use crate::cmd;
@@ -46,17 +47,24 @@ pub fn mount_not_found_error(workspace: &Path, mount_dir_exists: bool) -> String
 /// devcontainer during creation to `remoteUser`) is inherited automatically.
 /// This avoids devcontainer exec's config resolution and lifecycle hook
 /// re-execution, which caused concurrent session conflicts.
+///
+/// TTY flags:
+/// - `-i` (stdin open): always included for input passthrough
+/// - `-t` (pseudo-TTY): included when `tty=true` (interactive sessions);
+///   omitted when stdin is a pipe (non-interactive commands)
 pub fn build_exec_args(
     container_id: &str,
     workspace_path: &Path,
+    tty: bool,
     command: &[String],
 ) -> Vec<String> {
-    let mut args = vec![
-        "exec".to_string(),
-        "-w".to_string(),
-        workspace_path.to_string_lossy().into_owned(),
-        container_id.to_string(),
-    ];
+    let mut args = vec!["exec".to_string(), "-i".to_string()];
+    if tty {
+        args.push("-t".to_string());
+    }
+    args.push("-w".to_string());
+    args.push(workspace_path.to_string_lossy().into_owned());
+    args.push(container_id.to_string());
     for c in command {
         args.push(c.clone());
     }
@@ -172,7 +180,8 @@ pub fn run_exec(
     // creation, so no `-u` flag is needed. SIGINT is forwarded naturally (same process group).
     progress::step("Running exec in container...");
 
-    let args = build_exec_args(&container_id, &workspace, &command);
+    let tty = std::io::stdin().is_terminal();
+    let args = build_exec_args(&container_id, &workspace, tty, &command);
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     cmd::run_stream("docker", &args_str).unwrap_or(exit_codes::PREREQ_NOT_FOUND)
 }
@@ -207,14 +216,14 @@ mod tests {
     #[test]
     fn exec_args_includes_container_id() {
         let ws = Path::new("/home/user/myproject");
-        let args = build_exec_args("abc123", ws, &[]);
+        let args = build_exec_args("abc123", ws, false, &[]);
         assert!(args.contains(&"abc123".to_string()));
     }
 
     #[test]
     fn exec_args_sets_working_directory() {
         let ws = Path::new("/home/user/myproject");
-        let args = build_exec_args("abc123", ws, &[]);
+        let args = build_exec_args("abc123", ws, false, &[]);
         let wi = args.iter().position(|a| a == "-w").unwrap();
         assert_eq!(args[wi + 1], "/home/user/myproject");
     }
@@ -223,7 +232,7 @@ mod tests {
     fn exec_args_appends_command_directly() {
         let ws = Path::new("/home/user/myproject");
         let cmd = vec!["bash".to_string(), "-c".to_string(), "echo hi".to_string()];
-        let args = build_exec_args("abc123", ws, &cmd);
+        let args = build_exec_args("abc123", ws, false, &cmd);
         // Command follows container ID directly (no -- separator needed for docker exec)
         let cid_pos = args.iter().position(|a| a == "abc123").unwrap();
         assert_eq!(args[cid_pos + 1], "bash");
@@ -234,22 +243,23 @@ mod tests {
     #[test]
     fn exec_args_no_command_when_empty() {
         let ws = Path::new("/home/user/myproject");
-        let args = build_exec_args("abc123", ws, &[]);
-        // Only: exec -w <workspace> <container_id>
-        assert_eq!(args.len(), 4);
+        let args = build_exec_args("abc123", ws, false, &[]);
+        // exec -i -w <workspace> <container_id> (5 elements when tty=false)
+        assert_eq!(args.len(), 5);
     }
 
     #[test]
     fn exec_args_uses_docker_exec_format() {
         let ws = Path::new("/home/user/myproject");
         let cmd = vec!["echo".to_string(), "hello".to_string()];
-        let args = build_exec_args("abc123", ws, &cmd);
+        let args = build_exec_args("abc123", ws, false, &cmd);
         assert_eq!(args[0], "exec");
-        assert_eq!(args[1], "-w");
-        assert_eq!(args[2], "/home/user/myproject");
-        assert_eq!(args[3], "abc123");
-        assert_eq!(args[4], "echo");
-        assert_eq!(args[5], "hello");
+        assert_eq!(args[1], "-i");
+        assert_eq!(args[2], "-w");
+        assert_eq!(args[3], "/home/user/myproject");
+        assert_eq!(args[4], "abc123");
+        assert_eq!(args[5], "echo");
+        assert_eq!(args[6], "hello");
     }
 
     // --- mount_not_found_error ---
@@ -268,5 +278,34 @@ mod tests {
         let ws = Path::new("/home/user/myproject");
         let msg = mount_not_found_error(ws, false);
         assert!(msg.contains("No mount found"), "got: {msg}");
+    }
+
+    // --- TTY flag tests ---
+
+    #[test]
+    fn exec_args_always_includes_interactive_flag() {
+        let ws = Path::new("/home/user/myproject");
+        let args_tty = build_exec_args("abc123", ws, true, &[]);
+        let args_no_tty = build_exec_args("abc123", ws, false, &[]);
+        assert!(args_tty.contains(&"-i".to_string()), "got: {:?}", args_tty);
+        assert!(
+            args_no_tty.contains(&"-i".to_string()),
+            "got: {:?}",
+            args_no_tty
+        );
+    }
+
+    #[test]
+    fn exec_args_includes_tty_flag_when_true() {
+        let ws = Path::new("/home/user/myproject");
+        let args = build_exec_args("abc123", ws, true, &[]);
+        assert!(args.contains(&"-t".to_string()), "got: {:?}", args);
+    }
+
+    #[test]
+    fn exec_args_no_tty_flag_when_false() {
+        let ws = Path::new("/home/user/myproject");
+        let args = build_exec_args("abc123", ws, false, &[]);
+        assert!(!args.contains(&"-t".to_string()), "got: {:?}", args);
     }
 }
