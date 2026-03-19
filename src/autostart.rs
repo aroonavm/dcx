@@ -28,12 +28,12 @@ pub fn service_file_path(home: &Path) -> PathBuf {
 ///
 /// Linux: systemd user service unit with ExecStart/ExecStop.
 /// macOS: launchd plist with ProgramArguments and RunAtLoad.
-pub fn generate_service_content(colima_bin: &str) -> String {
+pub fn generate_service_content(colima_bin: &str, path_env: &str) -> String {
     #[cfg(target_os = "linux")]
     {
         format!(
-            "[Unit]\nDescription=Colima container runtime\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart={} start\nExecStop={} stop\n\n[Install]\nWantedBy=default.target\n",
-            colima_bin, colima_bin
+            "[Unit]\nDescription=Colima container runtime\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nEnvironment=\"PATH={}\"\nExecStart={} start\nExecStop={} stop\n\n[Install]\nWantedBy=default.target\n",
+            path_env, colima_bin, colima_bin
         )
     }
     #[cfg(target_os = "macos")]
@@ -115,7 +115,9 @@ fn run_enable(home: &Path) -> i32 {
     }
 
     // 4. Write service content.
-    let content = generate_service_content(&colima_bin);
+    let path_env =
+        std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
+    let content = generate_service_content(&colima_bin, &path_env);
     if let Err(e) = std::fs::write(&service_path, &content) {
         eprintln!(
             "Failed to write service file {}: {}",
@@ -145,8 +147,9 @@ fn run_enable(home: &Path) -> i32 {
             Ok(out) if out.status == 0 => {
                 println!("✓ Colima autostart enabled");
             }
-            Ok(_) => {
-                eprintln!("Failed to start colima (may already be running)");
+            Ok(out) => {
+                eprintln!("Failed to start colima service: {}", out.stderr.trim());
+                return exit_codes::RUNTIME_ERROR;
             }
             Err(e) => {
                 eprintln!("Error starting colima: {}", e);
@@ -244,12 +247,15 @@ fn run_status(home: &Path) -> i32 {
             .map(|out| out.status == 0)
             .unwrap_or(false);
 
-        let is_active = cmd::run_capture("systemctl", &["--user", "is-active", "colima"])
-            .map(|out| out.status == 0)
-            .unwrap_or(false);
+        let active_state = cmd::run_capture(
+            "systemctl",
+            &["--user", "show", "-p", "ActiveState", "--value", "colima"],
+        )
+        .map(|out| out.stdout.trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
 
         println!("Enabled: {}", if is_enabled { "yes" } else { "no" });
-        println!("Active: {}", if is_active { "yes" } else { "no" });
+        println!("Active: {}", active_state);
     }
 
     #[cfg(target_os = "macos")]
@@ -303,18 +309,21 @@ mod tests {
 
     #[test]
     fn generate_service_content_includes_binary_path() {
-        let content = generate_service_content("/usr/local/bin/colima");
+        let content =
+            generate_service_content("/usr/local/bin/colima", "/usr/local/bin:/usr/bin:/bin");
         assert!(content.contains("/usr/local/bin/colima"));
     }
 
     #[test]
     #[cfg(target_os = "linux")]
     fn generate_service_content_linux_is_systemd_format() {
-        let content = generate_service_content("/usr/local/bin/colima");
+        let content =
+            generate_service_content("/usr/local/bin/colima", "/usr/local/bin:/usr/bin:/bin");
         assert!(content.contains("[Unit]"));
         assert!(content.contains("[Service]"));
         assert!(content.contains("Type=oneshot"));
         assert!(content.contains("RemainAfterExit=yes"));
+        assert!(content.contains("Environment=\"PATH="));
         assert!(content.contains("ExecStart="));
         assert!(content.contains("ExecStop="));
         assert!(content.contains("[Install]"));
@@ -324,7 +333,8 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn generate_service_content_macos_is_plist_format() {
-        let content = generate_service_content("/usr/local/bin/colima");
+        let content =
+            generate_service_content("/usr/local/bin/colima", "/usr/local/bin:/usr/bin:/bin");
         assert!(content.contains("<?xml"));
         assert!(content.contains("<plist"));
         assert!(content.contains("io.colima.autostart"));
