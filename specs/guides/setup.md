@@ -132,6 +132,28 @@ dcx up --help
 # Should show help for dcx up
 ```
 
+### 7. (Optional) Configure Colima autostart
+
+To start Colima automatically on system boot, use `dcx autostart`:
+
+```bash
+dcx autostart enable
+```
+
+This writes a platform-specific service file and activates it:
+- **Linux:** Creates systemd user unit at `~/.config/systemd/user/colima.service`
+- **macOS:** Creates launchd plist at `~/Library/LaunchAgents/io.colima.autostart.plist`
+
+Check status anytime:
+```bash
+dcx autostart status
+```
+
+To disable autostart later:
+```bash
+dcx autostart disable
+```
+
 ## Troubleshooting
 
 For detailed troubleshooting steps including common setup issues, see [`failure-recovery.md`](failure-recovery.md). Key diagnostic commands:

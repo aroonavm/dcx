@@ -306,6 +306,55 @@ dcx doctor
 
 ---
 
+### `dcx autostart` {#cmd-autostart}
+
+**Usage:**
+```bash
+dcx autostart enable   # Write service file and start Colima if not running
+dcx autostart disable  # Remove autostart configuration
+dcx autostart status   # Show current autostart status
+```
+
+**Behavior:**
+
+**Enable:**
+1. Locate Colima binary via `which colima`; fail exit 127 if not found
+2. Compute service file path:
+   - Linux: `~/.config/systemd/user/colima.service`
+   - macOS: `~/Library/LaunchAgents/io.colima.autostart.plist`
+3. Create parent directories if needed
+4. Generate platform-specific service content:
+   - Linux: systemd user unit with `ExecStart=colima start`, `ExecStop=colima stop`, `WantedBy=default.target`
+   - macOS: launchd plist with `ProgramArguments=[colima, start]`, `RunAtLoad=true`
+5. Write service file
+6. Activate service:
+   - Linux: `systemctl --user daemon-reload` → `systemctl --user enable colima` → `systemctl --user start colima`
+   - macOS: `launchctl load <service-path>`
+7. Print confirmation with service file location
+8. Exit 0 on success, 1 on any error
+
+**Disable:**
+1. Compute service file path
+2. If file doesn't exist: print "Autostart is not configured", exit 0
+3. Deactivate service:
+   - Linux: `systemctl --user stop colima` → `systemctl --user disable colima`
+   - macOS: `launchctl unload <service-path>` (ignore errors)
+4. Delete service file
+5. Print confirmation
+6. Exit 0 on success, 1 on file removal error
+
+**Status:**
+1. Compute service file path
+2. Print whether autostart is configured (file exists / does not exist)
+3. If configured, print service file path
+4. Check live service state:
+   - Linux: `systemctl --user is-enabled colima` and `systemctl --user is-active colima`
+   - macOS: `launchctl list io.colima.autostart` (exit code 0 = loaded)
+5. Print enabled and active status
+6. Exit 0 always
+
+---
+
 ### `dcx completions` {#cmd-completions}
 
 **Usage:**

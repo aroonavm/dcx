@@ -1,3 +1,4 @@
+mod autostart;
 mod categorize;
 mod clean;
 mod cli;
@@ -121,6 +122,9 @@ fn main() {
         }
         cli::Commands::Doctor => {
             std::process::exit(doctor::run_doctor(&home_dir()));
+        }
+        cli::Commands::Autostart { action } => {
+            std::process::exit(autostart::run_autostart(&home_dir(), &action));
         }
         cli::Commands::Completions { shell } => {
             std::process::exit(completions::run_completions(shell));

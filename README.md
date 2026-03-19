@@ -150,6 +150,27 @@ dcx up --config-dir ~/.dcx --workspace-folder ~/testing-project --network host
 # Changing devcontainer.json (e.g. bumping a package version) triggers a new build.
 ```
 
+### Automatic Colima Startup
+
+Configure Colima to start automatically on system boot using `dcx autostart`:
+
+```bash
+# Enable autostart (writes systemd service on Linux, launchd plist on macOS)
+dcx autostart enable
+
+# Check current status
+dcx autostart status
+
+# Disable autostart later
+dcx autostart disable
+```
+
+The service file location depends on your platform:
+- **Linux:** `~/.config/systemd/user/colima.service` (user-level systemd service)
+- **macOS:** `~/Library/LaunchAgents/io.colima.autostart.plist` (launchd agent)
+
+This eliminates the need to manually start Colima after system boot — it will start automatically and be ready for your first `dcx up` command.
+
 ## Documentation
 
 - **[Setup Guide](specs/guides/setup.md)** — Installation & configuration

@@ -135,6 +135,12 @@ pub enum Commands {
     /// Validate prerequisites (bindfs, devcontainer, Docker, Colima)
     Doctor,
 
+    /// Manage Colima autostart on system boot
+    Autostart {
+        #[command(subcommand)]
+        action: AutostartAction,
+    },
+
     #[command(
         about = "Generate shell completion script (bash, zsh, fish, powershell, elvish)",
         long_about = "Generates a completion script for your shell to enable tab-completion of dcx commands.\n\n\
@@ -177,4 +183,14 @@ pub enum Commands {
     /// Forward to devcontainer CLI (any unrecognised subcommand)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand)]
+pub enum AutostartAction {
+    /// Configure Colima to start on boot and start it now if not running
+    Enable,
+    /// Remove Colima autostart configuration
+    Disable,
+    /// Show current autostart status
+    Status,
 }
